@@ -1,0 +1,386 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Unplayd catalog-api",
+    "version": "0.1.0",
+    "description": "Phase 1 contract. Business endpoints are implemented in subsequent tickets; this file does not claim they are available."
+  },
+  "paths": {
+    "/health/live": {
+      "get": {
+        "operationId": "getCatalogLiveness",
+        "summary": "Process liveness",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./common.json#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        },
+        "security": []
+      }
+    },
+    "/games": {
+      "get": {
+        "operationId": "searchGames",
+        "summary": "Search the catalog",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "platformId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "description": "Opaque cursor; clients must not construct or interpret it."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/games/{gameId}": {
+      "get": {
+        "operationId": "getGame",
+        "summary": "Get a game by stable internal UUID",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "gameId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Game"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/games/batch": {
+      "post": {
+        "operationId": "getGamesBatch",
+        "summary": "Resolve a bounded batch without N+1 requests",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameBatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GameBatchRequest"
+              }
+            }
+          }
+        },
+        "description": "Each requested ID appears exactly once in items, missingGameIds or inactiveGameIds. Result order is not guaranteed; associate by id."
+      }
+    }
+  },
+  "security": [
+    {
+      "serviceToken": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "serviceToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Service token"
+      }
+    },
+    "schemas": {
+      "Platform": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["id", "name"]
+      },
+      "Game": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "coverUrl": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Platform"
+            }
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "UTC ISO-8601 timestamp with Z suffix."
+          }
+        },
+        "required": ["id", "title", "coverUrl", "platforms", "isActive", "updatedAt"]
+      },
+      "GamePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Game"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": ["items", "nextCursor"],
+        "example": {
+          "items": [],
+          "nextCursor": null
+        }
+      },
+      "GameBatchRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "gameIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true
+          }
+        },
+        "required": ["gameIds"]
+      },
+      "GameBatchResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Game"
+            }
+          },
+          "missingGameIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "inactiveGameIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": ["items", "missingGameIds", "inactiveGameIds"]
+      }
+    }
+  }
+}

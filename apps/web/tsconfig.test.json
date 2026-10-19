@@ -1,0 +1,6 @@
+{
+  "extends": "./.nuxt/tsconfig.server.json",
+  "compilerOptions": { "noEmit": true, "types": ["node"] },
+  "include": ["test/**/*.ts", "server/**/*.ts"],
+  "exclude": ["node_modules", "coverage"]
+}

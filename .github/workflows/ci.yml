@@ -33,12 +33,12 @@ jobs:
           cache: false
       - run: vp install --frozen-lockfile
       - run: vp run check && vp run build
-      - run: ./gradlew --no-daemon check jacocoTestReport installDist
-        working-directory: apps/user-api
-      - run: test -z "$(gofmt -l .)" && go vet ./... && go test -race -coverprofile=coverage.out ./... && go build -o /tmp/catalog-api ./cmd/catalog-api
-        working-directory: apps/catalog-api
+      - run: vp run test
+      - run: vp run smoke
       - name: SonarQube Cloud
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        with:
+          args: -Dsonar.qualitygate.wait=true
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

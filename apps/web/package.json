@@ -7,16 +7,19 @@
     "build": "nuxt build",
     "preview": "node .output/server/index.mjs",
     "postinstall": "nuxt prepare",
-    "lint:vue": "eslint .",
-    "typecheck": "nuxt typecheck"
+    "lint:eslint": "eslint . --max-warnings=0",
+    "typecheck": "nuxt typecheck && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
+    "h3": "1.15.11",
     "nuxt": "4.6.1",
+    "openapi-fetch": "0.17.0",
     "vue": "3.5.44",
     "vue-router": "5.4.0"
   },
   "devDependencies": {
     "@nuxt/eslint": "1.17.0",
+    "@types/node": "24.19.2",
     "eslint": "10.12.0",
     "eslint-plugin-oxlint": "1.88.0",
     "typescript": "6.0.3",

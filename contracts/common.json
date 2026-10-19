@@ -1,0 +1,230 @@
+{
+  "components": {
+    "schemas": {
+      "RequestId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[a-zA-Z0-9_-]+$",
+        "example": "trace_123-ABC"
+      },
+      "Health": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ok"]
+          },
+          "service": {
+            "type": "string",
+            "enum": ["web", "user-api", "catalog-api"]
+          }
+        },
+        "required": ["status", "service"]
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "invalid_request",
+                  "unauthorized",
+                  "forbidden",
+                  "not_found",
+                  "conflict",
+                  "unavailable",
+                  "internal_error"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe public message; never credentials or internal URLs."
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              }
+            },
+            "required": ["code", "message", "requestId"]
+          }
+        },
+        "required": ["error"],
+        "example": {
+          "error": {
+            "code": "invalid_request",
+            "message": "Invalid input.",
+            "requestId": "trace_123-ABC"
+          }
+        }
+      },
+      "Ownership": {
+        "type": "string",
+        "enum": ["owned", "wishlist", "subscription"],
+        "description": "Independent of play status. An implicit library entry starts as wishlist."
+      },
+      "PlayStatus": {
+        "type": "string",
+        "enum": ["backlog", "playing", "paused", "completed", "dropped"]
+      }
+    },
+    "headers": {
+      "RequestId": {
+        "description": "Validated incoming ID, or a newly generated ID when absent or invalid.",
+        "schema": {
+          "$ref": "#/components/schemas/RequestId"
+        }
+      }
+    },
+    "parameters": {
+      "RequestId": {
+        "name": "X-Request-ID",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "description": "Valid IDs are preserved. Missing or invalid values are replaced before any downstream call."
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "BadRequest",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "invalid_request",
+                "message": "BadRequest",
+                "requestId": "trace_123-ABC"
+              }
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Unauthorized",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "unauthorized",
+                "message": "Unauthorized",
+                "requestId": "trace_123-ABC"
+              }
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Forbidden",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "forbidden",
+                "message": "Forbidden",
+                "requestId": "trace_123-ABC"
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "NotFound",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "not_found",
+                "message": "NotFound",
+                "requestId": "trace_123-ABC"
+              }
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Conflict",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "conflict",
+                "message": "Conflict",
+                "requestId": "trace_123-ABC"
+              }
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "Unavailable",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "unavailable",
+                "message": "Unavailable",
+                "requestId": "trace_123-ABC"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

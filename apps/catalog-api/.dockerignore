@@ -1,4 +1,5 @@
 catalog-api
 coverage.out
+build
 .env*
 *.log

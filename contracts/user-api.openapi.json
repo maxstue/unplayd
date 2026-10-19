@@ -1,0 +1,961 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Unplayd user-api",
+    "version": "0.1.0",
+    "description": "Phase 1 contract. Business endpoints are implemented in subsequent tickets; this file does not claim they are available."
+  },
+  "paths": {
+    "/health/live": {
+      "get": {
+        "operationId": "getUserLiveness",
+        "summary": "Process liveness",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./common.json#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        },
+        "security": []
+      }
+    },
+    "/library": {
+      "get": {
+        "operationId": "listLibrary",
+        "summary": "List the authenticated user library",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "./common.json#/components/schemas/PlayStatus"
+            }
+          },
+          {
+            "name": "ownership",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "./common.json#/components/schemas/Ownership"
+            }
+          },
+          {
+            "name": "platformId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "description": "Opaque cursor; clients must not construct or interpret it."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "addLibraryEntry",
+        "summary": "Add a game to the own library",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          },
+          "200": {
+            "description": "Existing matching entry; no state overwritten.",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryEntry"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddLibraryEntry"
+              }
+            }
+          }
+        },
+        "description": "Validate game and optional platform through catalog-api before an atomic write. A repeated identical request returns the existing entry without overwriting ownership/status; conflicting existing data returns 409. Catalog unavailability returns 503 without a partial entry."
+      }
+    },
+    "/library/{gameId}": {
+      "get": {
+        "operationId": "getLibraryEntry",
+        "summary": "Get an own library entry",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "gameId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteLibraryEntry",
+        "summary": "Remove an own entry and its personal dependent records",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "gameId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/library/{gameId}/status": {
+      "put": {
+        "operationId": "setPlayStatus",
+        "summary": "Explicitly change play status",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "gameId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetStatus"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/favorites/{gameId}": {
+      "put": {
+        "operationId": "putFavorite",
+        "summary": "Idempotently favorite a game",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "gameId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        },
+        "description": "If absent, atomically create a validated library entry with ownership wishlist and status backlog. Never overwrite existing ownership/status."
+      },
+      "delete": {
+        "operationId": "deleteFavorite",
+        "summary": "Idempotently remove a favorite without removing the library entry",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "gameId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/ratings/{gameId}": {
+      "put": {
+        "operationId": "putRating",
+        "summary": "Set an integer rating from 1 to 10",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "gameId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRating"
+              }
+            }
+          }
+        },
+        "description": "Create a validated wishlist/backlog entry atomically when absent; preserve existing ownership/status."
+      },
+      "delete": {
+        "operationId": "deleteRating",
+        "summary": "Idempotently remove a rating",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "gameId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/notes/{gameId}": {
+      "put": {
+        "operationId": "putNote",
+        "summary": "Set a plain text note",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "gameId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetNote"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteNote",
+        "summary": "Idempotently remove a note",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "gameId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/next-game": {
+      "get": {
+        "operationId": "drawNextGame",
+        "summary": "Read-only uniform selection from the full own backlog",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "platformId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "excludeGameId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NextGame"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        },
+        "description": "All matching backlog entries are equally likely, across the whole result set. Exclude the previous game only when alternatives exist. A single candidate remains selectable. No candidate returns entry:null. Only PUT /library/{gameId}/status changes status."
+      }
+    }
+  },
+  "security": [
+    {
+      "clerkSession": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "clerkSession": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "GameSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "coverUrl": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true
+          }
+        },
+        "required": ["title", "coverUrl"]
+      },
+      "LibraryEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "gameId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platformId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "ownership": {
+            "$ref": "./common.json#/components/schemas/Ownership"
+          },
+          "status": {
+            "$ref": "./common.json#/components/schemas/PlayStatus"
+          },
+          "favorite": {
+            "type": "boolean"
+          },
+          "rating": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "nullable": true
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 10000,
+            "nullable": true
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/GameSnapshot"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "gameId",
+          "platformId",
+          "ownership",
+          "status",
+          "favorite",
+          "rating",
+          "note",
+          "snapshot",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "LibraryPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LibraryEntry"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": ["items", "nextCursor"],
+        "example": {
+          "items": [],
+          "nextCursor": null
+        }
+      },
+      "AddLibraryEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "gameId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ownership": {
+            "$ref": "./common.json#/components/schemas/Ownership"
+          },
+          "platformId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        },
+        "required": ["gameId", "ownership"]
+      },
+      "SetStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "$ref": "./common.json#/components/schemas/PlayStatus"
+          }
+        },
+        "required": ["status"]
+      },
+      "SetRating": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": ["value"]
+      },
+      "SetNote": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 10000
+          }
+        },
+        "required": ["text"]
+      },
+      "NextGame": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "entry": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LibraryEntry"
+              }
+            ],
+            "nullable": true,
+            "description": "Null when no matching own backlog entry exists; selection never changes state.",
+            "type": "object"
+          }
+        },
+        "required": ["entry"]
+      }
+    }
+  }
+}

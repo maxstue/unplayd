@@ -6,7 +6,7 @@ COPY apps/web/package.json apps/web/package.json
 RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY apps/web apps/web
 COPY vite.config.ts ./
-RUN pnpm exec vp run build
+RUN pnpm exec vp run build:web
 
 FROM node:24.21.0-bookworm-slim
 WORKDIR /app

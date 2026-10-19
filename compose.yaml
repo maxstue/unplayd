@@ -35,7 +35,9 @@ services:
     build: apps/catalog-api
     environment:
       PORT: "8082"
-      DATABASE_URL: postgresql://catalog:${CATALOG_DB_PASSWORD:?Set CATALOG_DB_PASSWORD in .env}@postgres:5432/unplayd?search_path=catalog
+      DATABASE_URL: postgresql://postgres:5432/unplayd?search_path=catalog&sslmode=disable
+      DATABASE_USER: catalog
+      DATABASE_PASSWORD: ${CATALOG_DB_PASSWORD:?Set CATALOG_DB_PASSWORD in .env}
       CATALOG_SERVICE_TOKEN: ${CATALOG_SERVICE_TOKEN:?Set CATALOG_SERVICE_TOKEN in .env}
     ports:
       - "127.0.0.1:8082:8082"

@@ -40,6 +40,17 @@
       "groupName": "frontend packages"
     },
     {
+      "matchManagers": ["npm"],
+      "matchPackageNames": [
+        "vite-plus",
+        "@voidzero-dev/vite-plus-core",
+        "vite",
+        "@vitest/coverage-v8"
+      ],
+      "groupName": "vite-plus toolchain",
+      "groupSlug": "vite-plus-toolchain"
+    },
+    {
       "matchManagers": ["gradle", "gradle-wrapper"],
       "matchUpdateTypes": ["patch", "minor"],
       "groupName": "kotlin packages"

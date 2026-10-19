@@ -1,0 +1,797 @@
+// Generated from contracts/user-api.openapi.json. Run vp run contracts:generate.
+export interface paths {
+    "/health/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Process liveness */
+        get: operations["getUserLiveness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the authenticated user library */
+        get: operations["listLibrary"];
+        put?: never;
+        /**
+         * Add a game to the own library
+         * @description Validate game and optional platform through catalog-api before an atomic write. A repeated identical request returns the existing entry without overwriting ownership/status; conflicting existing data returns 409. Catalog unavailability returns 503 without a partial entry.
+         */
+        post: operations["addLibraryEntry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/library/{gameId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get an own library entry */
+        get: operations["getLibraryEntry"];
+        put?: never;
+        post?: never;
+        /** Remove an own entry and its personal dependent records */
+        delete: operations["deleteLibraryEntry"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/library/{gameId}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Explicitly change play status */
+        put: operations["setPlayStatus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/favorites/{gameId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Idempotently favorite a game
+         * @description If absent, atomically create a validated library entry with ownership wishlist and status backlog. Never overwrite existing ownership/status.
+         */
+        put: operations["putFavorite"];
+        post?: never;
+        /** Idempotently remove a favorite without removing the library entry */
+        delete: operations["deleteFavorite"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ratings/{gameId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set an integer rating from 1 to 10
+         * @description Create a validated wishlist/backlog entry atomically when absent; preserve existing ownership/status.
+         */
+        put: operations["putRating"];
+        post?: never;
+        /** Idempotently remove a rating */
+        delete: operations["deleteRating"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{gameId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set a plain text note */
+        put: operations["putNote"];
+        post?: never;
+        /** Idempotently remove a note */
+        delete: operations["deleteNote"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/next-game": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read-only uniform selection from the full own backlog
+         * @description All matching backlog entries are equally likely, across the whole result set. Exclude the previous game only when alternatives exist. A single candidate remains selectable. No candidate returns entry:null. Only PUT /library/{gameId}/status changes status.
+         */
+        get: operations["drawNextGame"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+}
+export type webhooks = Record<string, never>;
+export interface components {
+    schemas: {
+        GameSnapshot: {
+            title: string;
+            /** Format: uri */
+            coverUrl: string | null;
+        };
+        LibraryEntry: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            gameId: string;
+            /** Format: uuid */
+            platformId: string | null;
+            ownership: components["schemas"]["Ownership"];
+            status: components["schemas"]["PlayStatus"];
+            favorite: boolean;
+            rating: number | null;
+            note: string | null;
+            snapshot: components["schemas"]["GameSnapshot"];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        /**
+         * @example {
+         *       "items": [],
+         *       "nextCursor": null
+         *     }
+         */
+        LibraryPage: {
+            items: components["schemas"]["LibraryEntry"][];
+            nextCursor: string | null;
+        };
+        AddLibraryEntry: {
+            /** Format: uuid */
+            gameId: string;
+            ownership: components["schemas"]["Ownership"];
+            /** Format: uuid */
+            platformId?: string | null;
+        };
+        SetStatus: {
+            status: components["schemas"]["PlayStatus"];
+        };
+        SetRating: {
+            value: number;
+        };
+        SetNote: {
+            text: string;
+        };
+        NextGame: {
+            /** @description Null when no matching own backlog entry exists; selection never changes state. */
+            entry: components["schemas"]["LibraryEntry"] | null;
+        };
+        /** @example trace_123-ABC */
+        RequestId: string;
+        Health: {
+            /** @enum {string} */
+            status: "ok";
+            /** @enum {string} */
+            service: "web" | "user-api" | "catalog-api";
+        };
+        /**
+         * @example {
+         *       "error": {
+         *         "code": "invalid_request",
+         *         "message": "Invalid input.",
+         *         "requestId": "trace_123-ABC"
+         *       }
+         *     }
+         */
+        Error: {
+            error: {
+                /** @enum {string} */
+                code: "invalid_request" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "unavailable" | "internal_error";
+                /** @description Safe public message; never credentials or internal URLs. */
+                message: string;
+                requestId: components["schemas"]["RequestId"];
+            };
+        };
+        /** @enum {string} */
+        PlayStatus: "backlog" | "playing" | "paused" | "completed" | "dropped";
+        /**
+         * @description Independent of play status. An implicit library entry starts as wishlist.
+         * @enum {string}
+         */
+        Ownership: "owned" | "wishlist" | "subscription";
+    };
+    responses: {
+        /** @description BadRequest */
+        BadRequest: {
+            headers: {
+                "X-Request-ID": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "invalid_request",
+                 *         "message": "BadRequest",
+                 *         "requestId": "trace_123-ABC"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Unauthorized */
+        Unauthorized: {
+            headers: {
+                "X-Request-ID": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "unauthorized",
+                 *         "message": "Unauthorized",
+                 *         "requestId": "trace_123-ABC"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Forbidden */
+        Forbidden: {
+            headers: {
+                "X-Request-ID": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "forbidden",
+                 *         "message": "Forbidden",
+                 *         "requestId": "trace_123-ABC"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description NotFound */
+        NotFound: {
+            headers: {
+                "X-Request-ID": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "not_found",
+                 *         "message": "NotFound",
+                 *         "requestId": "trace_123-ABC"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Conflict */
+        Conflict: {
+            headers: {
+                "X-Request-ID": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "conflict",
+                 *         "message": "Conflict",
+                 *         "requestId": "trace_123-ABC"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Unavailable */
+        Unavailable: {
+            headers: {
+                "X-Request-ID": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "unavailable",
+                 *         "message": "Unavailable",
+                 *         "requestId": "trace_123-ABC"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+    };
+    parameters: {
+        RequestId: string;
+    };
+    requestBodies: never;
+    headers: {
+        /** @description Validated incoming ID, or a newly generated ID when absent or invalid. */
+        RequestId: components["schemas"]["RequestId"];
+    };
+    pathItems: never;
+}
+export type $defs = Record<string, never>;
+export interface operations {
+    getUserLiveness: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Health"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listLibrary: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["PlayStatus"];
+                ownership?: components["schemas"]["Ownership"];
+                platformId?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    addLibraryEntry: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddLibraryEntry"];
+            };
+        };
+        responses: {
+            /** @description Existing matching entry; no state overwritten. */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryEntry"];
+                };
+            };
+            /** @description Success */
+            201: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryEntry"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getLibraryEntry: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path: {
+                gameId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryEntry"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteLibraryEntry: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path: {
+                gameId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            204: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    setPlayStatus: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path: {
+                gameId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetStatus"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryEntry"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    putFavorite: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path: {
+                gameId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryEntry"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteFavorite: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path: {
+                gameId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            204: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    putRating: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path: {
+                gameId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetRating"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryEntry"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteRating: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path: {
+                gameId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            204: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    putNote: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path: {
+                gameId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetNote"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryEntry"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteNote: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path: {
+                gameId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            204: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    drawNextGame: {
+        parameters: {
+            query?: {
+                platformId?: string;
+                excludeGameId?: string;
+            };
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NextGame"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+}

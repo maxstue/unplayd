@@ -2,31 +2,33 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/maxstue/unplayd/apps/catalog-api/internal/database"
+	"github.com/maxstue/unplayd/apps/catalog-api/internal/httpapi"
 )
 
-func handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "catalog-api"})
-	})
-	return mux
-}
-
 func main() {
+	if _, err := database.Load(os.Getenv); err != nil {
+		slog.Error("invalid database configuration", "error", err)
+		os.Exit(1)
+	}
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8082"
 	}
+	if value, err := strconv.Atoi(port); err != nil || value < 1 || value > 65535 {
+		slog.Error("PORT must be between 1 and 65535")
+		os.Exit(1)
+	}
 	server := &http.Server{
-		Addr: ":" + port, Handler: handler(),
+		Addr: ":" + port, Handler: httpapi.NewHandler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
 		WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second,
 	}

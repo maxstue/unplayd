@@ -1,0 +1,11 @@
+.git
+.vite
+.vite-cache
+**/node_modules
+**/.nuxt
+**/.output
+**/.gradle
+**/build
+**/.env*
+.env*
+coverage

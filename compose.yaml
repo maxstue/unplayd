@@ -1,0 +1,56 @@
+name: unplayd
+services:
+  postgres:
+    image: postgres:18.3-bookworm
+    environment:
+      POSTGRES_DB: unplayd
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      USER_API_DB_PASSWORD: ${USER_API_DB_PASSWORD:?Set USER_API_DB_PASSWORD in .env}
+      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:?Set CATALOG_DB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d unplayd"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  user-api:
+    build: apps/user-api
+    environment:
+      PORT: "8081"
+      DATABASE_URL: jdbc:postgresql://postgres:5432/unplayd?currentSchema=user_data
+      DATABASE_USER: user_api
+      DATABASE_PASSWORD: ${USER_API_DB_PASSWORD:?Set USER_API_DB_PASSWORD in .env}
+      CLERK_ISSUER: ${CLERK_ISSUER:-}
+      CLERK_AUTHORIZED_PARTY: ${CLERK_AUTHORIZED_PARTY:-http://localhost:3000}
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      postgres: { condition: service_healthy }
+  catalog-api:
+    build: apps/catalog-api
+    environment:
+      PORT: "8082"
+      DATABASE_URL: postgresql://catalog:${CATALOG_DB_PASSWORD:?Set CATALOG_DB_PASSWORD in .env}@postgres:5432/unplayd?search_path=catalog
+      CATALOG_SERVICE_TOKEN: ${CATALOG_SERVICE_TOKEN:?Set CATALOG_SERVICE_TOKEN in .env}
+    ports:
+      - "127.0.0.1:8082:8082"
+    depends_on:
+      postgres: { condition: service_healthy }
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      NUXT_USER_API_URL: http://user-api:8081
+      NUXT_CATALOG_API_URL: http://catalog-api:8082
+      NUXT_CATALOG_SERVICE_TOKEN: ${CATALOG_SERVICE_TOKEN:?Set CATALOG_SERVICE_TOKEN in .env}
+    depends_on: [user-api, catalog-api]
+volumes:
+  postgres-data:

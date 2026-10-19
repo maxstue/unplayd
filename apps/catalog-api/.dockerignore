@@ -1,0 +1,4 @@
+catalog-api
+coverage.out
+.env*
+*.log

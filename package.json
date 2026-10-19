@@ -1,0 +1,21 @@
+{
+  "name": "unplayd",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp run @unplayd/web#dev",
+    "build": "vp run @unplayd/web#build",
+    "check": "vp check && vp run @unplayd/web#lint:vue && vp run @unplayd/web#typecheck",
+    "lint": "vp lint && vp run @unplayd/web#lint:vue",
+    "typecheck": "vp run @unplayd/web#typecheck",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check"
+  },
+  "devDependencies": {
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=24.21.0 <25 || >=26.0.0 <27"
+  },
+  "packageManager": "pnpm@12.11.2"
+}

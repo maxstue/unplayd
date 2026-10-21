@@ -10,35 +10,193 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
-  quality:
+  repository:
+    name: Repository and contracts
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
       - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
         with:
           node-version: 24.21.0
           cache: true
           run-install: false
+      - run: vp install --frozen-lockfile
+      - run: vp run check:repo
+      - run: vp run contracts:check
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version: 24.21.0
+          cache: true
+          run-install: false
+      - run: vp install --frozen-lockfile
+      - run: vp run check:web
+      - run: vp run build:web
+      - run: vp run test:web
+      - name: Upload Web reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-reports
+          path: apps/web/coverage/
+          if-no-files-found: error
+          retention-days: 7
+
+  user-api:
+    name: User API
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/user-api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: "25"
+          cache: gradle
+      - name: Check and build
+        run: ./gradlew --no-daemon check installDist
+      - name: Test and coverage
+        run: ./gradlew --no-daemon test jacocoTestReport
+      - name: Upload User API reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: user-api-reports
+          path: |
+            apps/user-api/build/reports/jacoco/test/jacocoTestReport.xml
+            apps/user-api/build/test-results/test/
+          if-no-files-found: error
+          retention-days: 7
+
+  catalog-api:
+    name: Catalog API
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/catalog-api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: apps/catalog-api/go.mod
-          cache: false
-      - run: vp install --frozen-lockfile
-      - run: vp run check && vp run build
-      - run: vp run test
-      - run: vp run smoke
-      - name: SonarQube Cloud
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+          cache-dependency-path: apps/catalog-api/go.sum
+      - name: Format
+        run: files=$(gofmt -l .) && test -z "$files"
+      - name: Vet
+        run: go vet ./...
+      - name: Build service
+        run: go build -trimpath -o build/catalog-api ./cmd/catalog-api
+      - name: Build migrator
+        run: go build -trimpath -o build/migrate ./cmd/migrate
+      - name: Test and coverage
+        run: go test -race -count=1 -v -coverprofile=coverage.out ./...
+      - name: Upload Catalog API coverage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: catalog-api-reports
+          path: apps/catalog-api/coverage.out
+          if-no-files-found: error
+          retention-days: 7
+
+  integration:
+    name: Compose integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      COMPOSE_PROJECT_NAME: unplayd-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      COMPOSE_FILE: compose.yaml:compose.test.yaml
+      # Disposable credentials for this isolated runner's test database only.
+      POSTGRES_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-postgres
+      USER_API_DB_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-user
+      CATALOG_DB_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-catalog
+      CATALOG_SERVICE_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}-service
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.21.0
+      - name: Build and start isolated stack
+        run: docker compose --env-file /dev/null up --build --wait --wait-timeout 120
+      - name: HTTP and PostgreSQL tests
+        run: node --test --test-reporter=spec tests/integration/*.test.mjs
+      - name: Service logs on failure
+        if: failure()
+        run: docker compose --env-file /dev/null logs --no-color --tail 80
+      - name: Remove isolated stack
+        if: always()
+        run: docker compose --env-file /dev/null down --volumes --remove-orphans
+
+  sonar:
+    name: Sonar Quality Gate
+    needs: [repository, web, user-api, catalog-api, integration]
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download Web reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-reports
+          path: apps/web/coverage/
+      - name: Download User API reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: user-api-reports
+          path: apps/user-api/build/
+      - name: Download Catalog API coverage
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: catalog-api-reports
+          path: apps/catalog-api/
+      - name: Scan and wait for Quality Gate
         uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
         with:
           args: -Dsonar.qualitygate.wait=true
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  quality:
+    name: quality
+    needs: [repository, web, user-api, catalog-api, integration, sonar]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all jobs to pass
+        env:
+          CHECKS_PASSED: >-
+            ${{ needs.repository.result == 'success' &&
+                needs.web.result == 'success' &&
+                needs.user-api.result == 'success' &&
+                needs.catalog-api.result == 'success' &&
+                needs.integration.result == 'success' &&
+                (needs.sonar.result == 'success' ||
+                  (needs.sonar.result == 'skipped' &&
+                   github.event_name == 'pull_request' &&
+                   github.event.pull_request.head.repo.full_name != github.repository)) }}
+        run: test "$CHECKS_PASSED" = true

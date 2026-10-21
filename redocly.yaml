@@ -1,0 +1,11 @@
+extends:
+  - minimal
+apis:
+  catalog-api:
+    root: contracts/catalog-api.openapi.json
+    x-openapi-ts:
+      output: apps/web/server/clients/generated/catalog-api.d.ts
+  user-api:
+    root: contracts/user-api.openapi.json
+    x-openapi-ts:
+      output: apps/web/server/clients/generated/user-api.d.ts

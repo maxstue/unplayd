@@ -8,8 +8,8 @@
     "lint": "./gradlew --no-daemon ktlintCheck",
     "format": "./gradlew --no-daemon ktlintFormat",
     "format:check": "./gradlew --no-daemon ktlintCheck",
-    "test": "./gradlew --no-daemon verifyTestReports",
+    "test": "./gradlew --no-daemon test jacocoTestReport",
     "dev": "DATABASE_URL=\"${USER_API_DATABASE_URL:-jdbc:postgresql://localhost:54329/unplayd?currentSchema=user_data}\" DATABASE_USER=user_api DATABASE_PASSWORD=\"$USER_API_DB_PASSWORD\" ./gradlew --no-daemon run",
-    "db:migrate": "node ../../scripts/migrate.mjs user-api"
+    "db:migrate": "docker compose run --build --rm --no-deps user-api bin/user-api migrate"
   }
 }

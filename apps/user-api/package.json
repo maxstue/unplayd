@@ -1,0 +1,15 @@
+{
+  "name": "@unplayd/user-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "./gradlew --no-daemon installDist",
+    "check": "./gradlew --no-daemon check",
+    "lint": "./gradlew --no-daemon ktlintCheck",
+    "format": "./gradlew --no-daemon ktlintFormat",
+    "format:check": "./gradlew --no-daemon ktlintCheck",
+    "test": "./gradlew --no-daemon verifyTestReports",
+    "dev": "DATABASE_URL=\"${USER_API_DATABASE_URL:-jdbc:postgresql://localhost:54329/unplayd?currentSchema=user_data}\" DATABASE_USER=user_api DATABASE_PASSWORD=\"$USER_API_DB_PASSWORD\" ./gradlew --no-daemon run",
+    "db:migrate": "node ../../scripts/migrate.mjs user-api"
+  }
+}

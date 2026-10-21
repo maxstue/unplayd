@@ -8,7 +8,12 @@
     "preview": "node .output/server/index.mjs",
     "postinstall": "nuxt prepare",
     "lint:eslint": "eslint . --max-warnings=0",
-    "typecheck": "nuxt typecheck && tsc --noEmit -p tsconfig.test.json"
+    "typecheck": "nuxt typecheck && tsc --noEmit -p tsconfig.test.json",
+    "check": "vp run format:check && vp run lint && vp run typecheck",
+    "lint": "vp lint --deny-warnings && vp run lint:eslint",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check",
+    "test": "vp test run --coverage"
   },
   "dependencies": {
     "h3": "1.15.11",
@@ -20,9 +25,11 @@
   "devDependencies": {
     "@nuxt/eslint": "1.17.0",
     "@types/node": "24.19.2",
+    "@vitest/coverage-v8": "5.0.4",
     "eslint": "10.12.0",
     "eslint-plugin-oxlint": "1.88.0",
     "typescript": "6.0.3",
+    "vite-plus": "catalog:",
     "vue-tsc": "3.3.13"
   }
 }

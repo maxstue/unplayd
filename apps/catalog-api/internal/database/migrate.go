@@ -19,26 +19,48 @@ var migrations embed.FS
 
 // Migrate applies only forward migrations inside the catalog-owned schema.
 func Migrate(ctx context.Context, config Config, target *uint) error {
-	err := migrateDatabase(ctx, config, target)
-	if err != nil {
-		return errors.New(strings.ReplaceAll(err.Error(), config.password, "[REDACTED]"))
+	if err := migrateDatabase(ctx, config, target); err != nil {
+		return redact(err, config)
 	}
 	return nil
 }
 
-func migrateDatabase(ctx context.Context, config Config, target *uint) error {
+// Open returns a connection pool that is verified to use the catalog role.
+func Open(ctx context.Context, config Config) (*sql.DB, error) {
+	db, err := open(ctx, config)
+	if err != nil {
+		return nil, redact(err, config)
+	}
+	return db, nil
+}
+
+func open(ctx context.Context, config Config) (*sql.DB, error) {
 	db, err := sql.Open("postgres", config.connectionString())
+	if err != nil {
+		return nil, err
+	}
+	var role string
+	if err := db.QueryRowContext(ctx, "SELECT current_user").Scan(&role); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if role != "catalog" {
+		db.Close()
+		return nil, errors.New("connection must use the catalog role")
+	}
+	return db, nil
+}
+
+func redact(err error, config Config) error {
+	return errors.New(strings.ReplaceAll(err.Error(), config.password, "[REDACTED]"))
+}
+
+func migrateDatabase(ctx context.Context, config Config, target *uint) error {
+	db, err := open(ctx, config)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	var role string
-	if err := db.QueryRowContext(ctx, "SELECT current_user").Scan(&role); err != nil {
-		return err
-	}
-	if role != "catalog" {
-		return errors.New("migration connection must use the catalog role")
-	}
 	source, err := iofs.New(migrations, "migrations")
 	if err != nil {
 		return err

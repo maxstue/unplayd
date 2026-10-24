@@ -8,12 +8,12 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 
 class AuthConfigTest {
-    private val base = mapOf("CLERK_ISSUER" to "https://clerk.test", "CLERK_AUTHORIZED_PARTY" to "http://localhost:3000")
+    private val base = mapOf("CLERK_ISSUER" to "https://clerk.test", "CLERK_AUTHORIZED_PARTY" to "http://localhost:8444")
 
     @Test
     fun `valid HTTPS origins and local authorized parties retain exact values`() {
         val parties =
-            listOf("https://app.test", "https://app.test:8443", "http://localhost:3000", "http://127.0.0.1:3000", "http://[::1]:3000")
+            listOf("https://app.test", "https://app.test:8443", "http://localhost:8444", "http://127.0.0.1:8444", "http://[::1]:8444")
         parties.forEach { party ->
             val config = AuthConfig.load((base + ("CLERK_AUTHORIZED_PARTY" to party))::get)
             assertEquals("https://clerk.test", config.issuer)
@@ -44,7 +44,7 @@ class AuthConfigTest {
             }
         }
         listOf(
-            base + ("CLERK_ISSUER" to "http://localhost:3000"),
+            base + ("CLERK_ISSUER" to "http://localhost:8444"),
             base + ("CLERK_AUTHORIZED_PARTY" to "http://app.test"),
             base + ("CLERK_AUTHORIZED_PARTY" to "http://localhost.evil.test"),
         ).forEach { values -> assertFailsWith<IllegalArgumentException> { AuthConfig.load(values::get) } }

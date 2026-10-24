@@ -24,9 +24,9 @@ describe("validateAuthConfig", () => {
   it.each([
     "https://app.example",
     "https://app.example:8443",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://[::1]:3000",
+    "http://localhost:8444",
+    "http://127.0.0.1:8444",
+    "http://[::1]:8444",
   ])("accepts the canonical application origin %s", (appOrigin) => {
     expect(() => validateAuthConfig({ ...authConfig(), appOrigin })).not.toThrow();
   });

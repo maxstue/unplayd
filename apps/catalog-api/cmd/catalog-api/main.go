@@ -27,7 +27,7 @@ func main() {
 	}
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8082"
+		port = "8446"
 	}
 	if value, err := strconv.Atoi(port); err != nil || value < 1 || value > 65535 {
 		slog.Error("PORT must be between 1 and 65535")

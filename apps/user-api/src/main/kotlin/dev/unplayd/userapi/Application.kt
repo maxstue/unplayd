@@ -43,7 +43,7 @@ fun main(args: Array<String>) {
         return
     }
     require(args.isEmpty()) { "Usage: user-api [migrate [targetVersion]]" }
-    val port = System.getenv("PORT")?.let { requireNotNull(it.toIntOrNull()) { "PORT must be an integer" } } ?: 8081
+    val port = System.getenv("PORT")?.let { requireNotNull(it.toIntOrNull()) { "PORT must be an integer" } } ?: 8445
     require(port in 1..65535) { "PORT must be between 1 and 65535" }
     embeddedServer(Netty, host = "0.0.0.0", port = port) {
         module(users = JdbcUserStore(database))

@@ -11,7 +11,7 @@ it("uses typed catalog parameters and forwards server credentials and the reques
     .fn<typeof fetch>()
     .mockResolvedValue(Response.json({ items: [], nextCursor: null }));
   const client = createCatalogClient({
-    baseUrl: "http://catalog-api:8082",
+    baseUrl: "http://catalog-api:8446",
     token,
     requestId,
     fetch: fetcher,
@@ -19,7 +19,7 @@ it("uses typed catalog parameters and forwards server credentials and the reques
   const result = await client.GET("/games", { params: { query: { query: "Zelda" } } });
   const request = fetcher.mock.calls[0]![0] as Request;
 
-  expect(request.url).toBe("http://catalog-api:8082/games?query=Zelda");
+  expect(request.url).toBe("http://catalog-api:8446/games?query=Zelda");
   expect(request.headers.get("Authorization")).toBe(`Bearer ${token}`);
   expect(request.headers.get("X-Request-ID")).toBe(requestId);
   expect(result.data).toEqual({ items: [], nextCursor: null });
@@ -30,7 +30,7 @@ it("forwards cancellation and represents an empty next-game result without chang
   controller.abort();
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ entry: null }));
   const client = createUserClient({
-    baseUrl: "http://user-api:8081",
+    baseUrl: "http://user-api:8445",
     token: randomUUID(),
     requestId: randomUUID(),
     fetch: fetcher,
@@ -52,7 +52,7 @@ it.each([
 ])("rejects invalid service configuration without exposing values: %j", (invalid) => {
   expect(() =>
     serviceTransport({
-      baseUrl: "http://catalog-api:8082",
+      baseUrl: "http://catalog-api:8446",
       token: randomUUID(),
       requestId: randomUUID(),
       ...invalid,

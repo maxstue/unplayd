@@ -13,6 +13,7 @@ repositories { mavenCentral() }
 kotlin { jvmToolchain(25) }
 application { mainClass.set("dev.unplayd.userapi.ApplicationKt") }
 dependencyLocking { lockAllConfigurations() }
+sourceSets.test { resources.srcDir(projectDir.resolve("../../infra/postgres").canonicalFile) }
 
 val ktorVersion = "3.6.0"
 dependencies {

@@ -9,7 +9,7 @@ services:
       USER_API_DB_PASSWORD: ${USER_API_DB_PASSWORD:?Set USER_API_DB_PASSWORD via Infisical or environment}
       CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:?Set CATALOG_DB_PASSWORD via Infisical or environment}
     ports:
-      - "127.0.0.1:54329:5432"
+      - "127.0.0.1:8447:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
       - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
@@ -21,26 +21,26 @@ services:
   user-api:
     build: apps/user-api
     environment:
-      PORT: "8081"
+      PORT: "8445"
       DATABASE_URL: jdbc:postgresql://postgres:5432/unplayd?currentSchema=user_data
       DATABASE_USER: user_api
       DATABASE_PASSWORD: ${USER_API_DB_PASSWORD:?Set USER_API_DB_PASSWORD via Infisical or environment}
       CLERK_ISSUER: ${CLERK_ISSUER:?Set CLERK_ISSUER via Infisical or environment}
-      CLERK_AUTHORIZED_PARTY: ${CLERK_AUTHORIZED_PARTY:-http://localhost:3000}
+      CLERK_AUTHORIZED_PARTY: ${CLERK_AUTHORIZED_PARTY:-http://localhost:8444}
     ports:
-      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:8445:8445"
     depends_on:
       postgres: { condition: service_healthy }
   catalog-api:
     build: apps/catalog-api
     environment:
-      PORT: "8082"
+      PORT: "8446"
       DATABASE_URL: postgresql://postgres:5432/unplayd?search_path=catalog&sslmode=disable
       DATABASE_USER: catalog
       DATABASE_PASSWORD: ${CATALOG_DB_PASSWORD:?Set CATALOG_DB_PASSWORD via Infisical or environment}
       CATALOG_SERVICE_TOKEN: ${CATALOG_SERVICE_TOKEN:?Set CATALOG_SERVICE_TOKEN via Infisical or environment}
     ports:
-      - "127.0.0.1:8082:8082"
+      - "127.0.0.1:8446:8446"
     depends_on:
       postgres: { condition: service_healthy }
   web:
@@ -48,12 +48,12 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:8444:8444"
     environment:
-      NUXT_USER_API_URL: http://user-api:8081
-      NUXT_CATALOG_API_URL: http://catalog-api:8082
+      NUXT_USER_API_URL: http://user-api:8445
+      NUXT_CATALOG_API_URL: http://catalog-api:8446
       NUXT_CATALOG_SERVICE_TOKEN: ${CATALOG_SERVICE_TOKEN:?Set CATALOG_SERVICE_TOKEN via Infisical or environment}
-      NUXT_APP_ORIGIN: ${NUXT_APP_ORIGIN:-http://localhost:3000}
+      NUXT_APP_ORIGIN: ${NUXT_APP_ORIGIN:-http://localhost:8444}
       NUXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NUXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
       NUXT_CLERK_SECRET_KEY: ${NUXT_CLERK_SECRET_KEY:-}
     depends_on: [user-api, catalog-api]

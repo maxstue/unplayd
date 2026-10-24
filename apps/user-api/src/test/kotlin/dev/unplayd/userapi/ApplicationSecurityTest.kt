@@ -27,7 +27,7 @@ import kotlin.test.assertTrue
 class ApplicationSecurityTest {
     private val auth =
         AuthConfig.load(
-            mapOf("CLERK_ISSUER" to "https://clerk.test", "CLERK_AUTHORIZED_PARTY" to "http://localhost:3000")::get,
+            mapOf("CLERK_ISSUER" to "https://clerk.test", "CLERK_AUTHORIZED_PARTY" to "http://localhost:8444")::get,
         )
     private val tokens = SessionTokens()
     private val first = LocalUser(UUID.randomUUID(), subject())
@@ -70,7 +70,7 @@ class ApplicationSecurityTest {
                     "expired" to mapOf("exp" to now - 60),
                     "wrong issuer" to mapOf("iss" to "https://other.test"),
                     "wrong authorized party" to mapOf("azp" to "https://other.test"),
-                    "authorized party trailing slash" to mapOf("azp" to "http://localhost:3000/"),
+                    "authorized party trailing slash" to mapOf("azp" to "http://localhost:8444/"),
                     "future not before" to mapOf("nbf" to now + 3600),
                     "future issued at" to mapOf("iat" to now + 3600),
                     "pending session" to mapOf("sts" to "pending"),

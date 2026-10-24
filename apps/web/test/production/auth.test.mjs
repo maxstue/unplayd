@@ -30,7 +30,7 @@ before(async () => {
       HOST: "127.0.0.1",
       PORT: String(port),
       NITRO_PORT: String(port),
-      NUXT_APP_ORIGIN: "http://localhost:3000",
+      NUXT_APP_ORIGIN: "http://localhost:8444",
       NUXT_PUBLIC_CLERK_PUBLISHABLE_KEY: [
         "pk",
         "test",

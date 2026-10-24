@@ -12,9 +12,9 @@ export default defineNuxtConfig({
   },
   devtools: { enabled: false },
   runtimeConfig: {
-    appOrigin: "http://localhost:3000",
-    userApiUrl: "http://localhost:8081",
-    catalogApiUrl: "http://localhost:8082",
+    appOrigin: "http://localhost:8444",
+    userApiUrl: "http://localhost:8445",
+    catalogApiUrl: "http://localhost:8446",
     catalogServiceToken: "",
   },
   routeRules: {

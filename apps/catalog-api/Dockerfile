@@ -8,6 +8,6 @@ RUN CGO_ENABLED=0 go build -trimpath -o /catalog-api ./cmd/catalog-api && CGO_EN
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /catalog-api /catalog-api
 COPY --from=build /migrate /migrate
-ENV PORT=8082
-EXPOSE 8082
+ENV PORT=8446
+EXPOSE 8446
 ENTRYPOINT ["/catalog-api"]

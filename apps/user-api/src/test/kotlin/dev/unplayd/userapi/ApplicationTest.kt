@@ -18,7 +18,7 @@ import kotlin.test.assertTrue
 class ApplicationTest {
     private val auth =
         AuthConfig.load(
-            mapOf("CLERK_ISSUER" to "https://clerk.test", "CLERK_AUTHORIZED_PARTY" to "http://localhost:3000")::get,
+            mapOf("CLERK_ISSUER" to "https://clerk.test", "CLERK_AUTHORIZED_PARTY" to "http://localhost:8444")::get,
         )
     private val tokens = SessionTokens()
 

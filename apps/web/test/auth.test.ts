@@ -5,7 +5,7 @@ import { currentUser } from "../server/auth/current-user";
 import { requireSession } from "../server/auth/session";
 import requestId from "../server/middleware/request-id";
 
-const config = { appOrigin: "https://app.example", userApiUrl: "http://user-api:8081" };
+const config = { appOrigin: "https://app.example", userApiUrl: "http://user-api:8445" };
 
 function clerkSession(userId = "user_alice") {
   return {

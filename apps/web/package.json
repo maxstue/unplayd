@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "infisical run --env=dev --path=/Web -- nuxt dev --host 127.0.0.1",
+    "dev": "infisical run --env=dev --path=/Web -- nuxt dev --host 127.0.0.1 --port 8444",
     "build": "nuxt build",
     "preview": "infisical run --env=dev --path=/Web -- node .output/server/index.mjs",
     "postinstall": "nuxt prepare",

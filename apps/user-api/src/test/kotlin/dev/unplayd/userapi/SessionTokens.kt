@@ -46,7 +46,7 @@ internal class SessionTokens {
             mapOf(
                 "iss" to "https://clerk.test",
                 "sub" to subject,
-                "azp" to "http://localhost:3000",
+                "azp" to "http://localhost:8444",
                 "sid" to "sess_${UUID.randomUUID().toString().replace("-", "")}",
                 "iat" to now - 60,
                 "nbf" to now - 60,

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   test: {
+    alias: { "#imports": fileURLToPath(new URL("./test/nuxt-runtime.ts", import.meta.url)) },
     include: ["test/**/*.test.ts"],
     environment: "node",
     reporters: ["default", "junit"],

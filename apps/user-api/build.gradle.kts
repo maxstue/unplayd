@@ -13,6 +13,7 @@ repositories { mavenCentral() }
 kotlin { jvmToolchain(25) }
 application { mainClass.set("dev.unplayd.userapi.ApplicationKt") }
 dependencyLocking { lockAllConfigurations() }
+sourceSets.test { resources.srcDir(projectDir.resolve("../../infra/postgres").canonicalFile) }
 
 val ktorVersion = "3.6.0"
 dependencies {
@@ -29,6 +30,7 @@ dependencies {
     implementation("org.postgresql:postgresql:42.7.14")
     testImplementation("io.ktor:ktor-server-test-host")
     testImplementation(kotlin("test-junit5"))
+    testImplementation("org.testcontainers:testcontainers-postgresql:2.0.5")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

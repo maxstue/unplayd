@@ -118,39 +118,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  integration:
-    name: Compose integration
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      COMPOSE_PROJECT_NAME: unplayd-ci-${{ github.run_id }}-${{ github.run_attempt }}
-      COMPOSE_FILE: compose.yaml:compose.test.yaml
-      # Disposable credentials for this isolated runner's test database only.
-      POSTGRES_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-postgres
-      USER_API_DB_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-user
-      CATALOG_DB_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-catalog
-      CATALOG_SERVICE_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}-service
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24.21.0
-      - name: Build and start isolated stack
-        run: docker compose --env-file /dev/null up --build --wait --wait-timeout 120
-      - name: HTTP and PostgreSQL tests
-        run: node --test --test-reporter=spec tests/integration/*.test.mjs
-      - name: Service logs on failure
-        if: failure()
-        run: docker compose --env-file /dev/null logs --no-color --tail 80
-      - name: Remove isolated stack
-        if: always()
-        run: docker compose --env-file /dev/null down --volumes --remove-orphans
-
   sonar:
     name: Sonar Quality Gate
-    needs: [repository, web, user-api, catalog-api, integration]
+    needs: [repository, web, user-api, catalog-api]
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -183,7 +153,7 @@ jobs:
 
   quality:
     name: quality
-    needs: [repository, web, user-api, catalog-api, integration, sonar]
+    needs: [repository, web, user-api, catalog-api, sonar]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -194,7 +164,6 @@ jobs:
                 needs.web.result == 'success' &&
                 needs.user-api.result == 'success' &&
                 needs.catalog-api.result == 'success' &&
-                needs.integration.result == 'success' &&
                 (needs.sonar.result == 'success' ||
                   (needs.sonar.result == 'skipped' &&
                    github.event_name == 'pull_request' &&

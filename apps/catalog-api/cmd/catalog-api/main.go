@@ -10,25 +10,31 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/maxstue/unplayd/apps/catalog-api/internal/auth"
 	"github.com/maxstue/unplayd/apps/catalog-api/internal/database"
 	"github.com/maxstue/unplayd/apps/catalog-api/internal/httpapi"
 )
 
 func main() {
+	authConfig, err := auth.Load(os.Getenv)
+	if err != nil {
+		slog.Error("invalid authentication configuration", "error", err)
+		os.Exit(1)
+	}
 	if _, err := database.Load(os.Getenv); err != nil {
 		slog.Error("invalid database configuration", "error", err)
 		os.Exit(1)
 	}
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8082"
+		port = "8446"
 	}
 	if value, err := strconv.Atoi(port); err != nil || value < 1 || value > 65535 {
 		slog.Error("PORT must be between 1 and 65535")
 		os.Exit(1)
 	}
 	server := &http.Server{
-		Addr: ":" + port, Handler: httpapi.NewHandler(),
+		Addr: ":" + port, Handler: httpapi.NewHandler(authConfig.Token()),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
 		WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second,
 	}

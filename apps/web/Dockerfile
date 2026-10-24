@@ -11,8 +11,8 @@ RUN pnpm exec vp run build:web
 
 FROM node:24.21.0-bookworm-slim
 WORKDIR /app
-ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=8444
 COPY --from=build --chown=node:node /app/apps/web/.output .output
 USER node
-EXPOSE 3000
+EXPOSE 8444
 CMD ["node", ".output/server/index.mjs"]

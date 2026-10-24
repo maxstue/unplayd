@@ -1,5 +1,6 @@
 package dev.unplayd.userapi
 
+import dev.unplayd.userapi.auth.AuthConfig
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
@@ -15,10 +16,16 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class ApplicationTest {
+    private val auth =
+        AuthConfig.load(
+            mapOf("CLERK_ISSUER" to "https://clerk.test", "CLERK_AUTHORIZED_PARTY" to "http://localhost:8444")::get,
+        )
+    private val tokens = SessionTokens()
+
     @Test
     fun `liveness returns service identity and a generated request ID`() =
         testApplication {
-            application { module() }
+            application { module(auth, TestUsers(), auth.verifier(tokens.provider)) }
             val response = client.get("/health/live")
             val body = Json.parseToJsonElement(response.bodyAsText()).jsonObject
             assertEquals(HttpStatusCode.OK, response.status)
@@ -30,7 +37,7 @@ class ApplicationTest {
     @Test
     fun `valid request IDs are preserved including the length limit`() =
         testApplication {
-            application { module() }
+            application { module(auth, TestUsers(), auth.verifier(tokens.provider)) }
             listOf("trace_123-ABC", "a".repeat(64)).forEach { id ->
                 val response = client.get("/health/live") { header("X-Request-ID", id) }
                 assertEquals(HttpStatusCode.OK, response.status)
@@ -41,7 +48,7 @@ class ApplicationTest {
     @Test
     fun `invalid request IDs are replaced`() =
         testApplication {
-            application { module() }
+            application { module(auth, TestUsers(), auth.verifier(tokens.provider)) }
             listOf("invalid request id", "a".repeat(65)).forEach { id ->
                 val response = client.get("/health/live") { header("X-Request-ID", id) }
                 assertEquals(HttpStatusCode.OK, response.status)

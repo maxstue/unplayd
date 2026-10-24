@@ -10,6 +10,6 @@
     "format:check": "./gradlew --no-daemon ktlintCheck",
     "test": "./gradlew --no-daemon test jacocoTestReport",
     "dev": "infisical run --env=dev --path=/User_API -- ./gradlew --no-daemon run",
-    "db:migrate": "infisical run --env=dev --path=/Web --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose run --build --rm --no-deps user-api bin/user-api migrate"
+    "db:migrate": "infisical run --env=dev --path=/User_API -- ./gradlew --no-daemon run --args=migrate"
   }
 }

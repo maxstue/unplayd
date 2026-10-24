@@ -10,6 +10,6 @@
     "format:check": "files=$(gofmt -l .) && test -z \"$files\"",
     "test": "go test -race -count=1 -v -coverprofile=coverage.out ./...",
     "dev": "infisical run --env=dev --path=/Catalog_API -- go run ./cmd/catalog-api",
-    "db:migrate": "infisical run --env=dev --path=/Web --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose run --build --rm --no-deps --entrypoint /migrate catalog-api"
+    "db:migrate": "infisical run --env=dev --path=/Catalog_API -- go run ./cmd/migrate"
   }
 }

@@ -19,6 +19,7 @@ services:
       timeout: 3s
       retries: 20
   user-api:
+    profiles: [apps]
     build: apps/user-api
     environment:
       PORT: "8445"
@@ -32,6 +33,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
   catalog-api:
+    profiles: [apps]
     build: apps/catalog-api
     environment:
       PORT: "8446"
@@ -44,6 +46,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
   web:
+    profiles: [apps]
     build:
       context: .
       dockerfile: apps/web/Dockerfile

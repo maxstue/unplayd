@@ -4,10 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vp run --filter \"@unplayd/*\" --parallel dev",
-    "db:up": "infisical run --env=dev --path=/Web --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose up --wait postgres",
-    "backends:up": "vp run db:up && vp run db:migrate && infisical run --env=dev --path=/Web --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose up --build --wait user-api catalog-api",
-    "local:up": "vp run db:up && vp run db:migrate && infisical run --env=dev --path=/Web --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose up --build --wait",
-    "local:down": "infisical run --env=dev --path=/Web --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose down",
+    "db:up": "infisical run --env=dev --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose up --wait postgres",
     "dev:user-api": "vp run @unplayd/user-api#dev",
     "dev:catalog-api": "vp run @unplayd/catalog-api#dev",
     "build": "vp run --filter \"@unplayd/*\" build",
@@ -41,7 +38,10 @@
     "format:repo": "vp fmt package.json pnpm-workspace.yaml .infisical.yaml README.md renovate.json contracts infra .github redocly.yaml compose.yaml apps/user-api/package.json apps/catalog-api/package.json",
     "format:repo:check": "vp fmt --check package.json pnpm-workspace.yaml .infisical.yaml README.md renovate.json contracts infra .github redocly.yaml compose.yaml apps/user-api/package.json apps/catalog-api/package.json",
     "lint:web": "vp run @unplayd/web#lint",
-    "format:web": "vp run @unplayd/web#format"
+    "format:web": "vp run @unplayd/web#format",
+    "db:down": "infisical run --env=dev --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose down",
+    "local:up": "vp run db:up && vp run db:migrate && infisical run --env=dev --path=/Web --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose --profile apps up --build --wait",
+    "local:down": "infisical run --env=dev --path=/Web --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose --profile apps down"
   },
   "devDependencies": {
     "openapi-typescript": "7.13.0",

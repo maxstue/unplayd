@@ -20,11 +20,15 @@ import (
 )
 
 const (
-	source           = "igdb"
-	defaultAPIURL    = "https://api.igdb.com/v4"
-	defaultTokenURL  = "https://id.twitch.tv/oauth2/token"
-	coverURLPrefix   = "https://images.igdb.com/igdb/image/upload/t_cover_big/"
-	gameFields       = "name,cover.image_id,platforms.name"
+	source          = "igdb"
+	defaultAPIURL   = "https://api.igdb.com/v4"
+	defaultTokenURL = "https://id.twitch.tv/oauth2/token"
+	coverURLPrefix  = "https://images.igdb.com/igdb/image/upload/t_cover_big/"
+	gameFields      = "name,cover.image_id,platforms.name"
+	// searchGameTypes keeps trackable games: main games, expansions, standalone
+	// expansions, remakes, remasters, expanded games and ports. DLCs, bundles,
+	// mods, episodes, seasons, forks, packs and updates are excluded.
+	searchGameTypes  = "0,2,4,8,9,10,11"
 	maxResultLimit   = 500
 	maxAttempts      = 3
 	maxRetryAfter    = 5 * time.Second
@@ -83,7 +87,8 @@ func NewClient(config Config) (*Client, error) {
 	}, nil
 }
 
-// Search returns games whose title matches query, excluding editions of other games.
+// Search returns trackable games whose title matches query, excluding editions,
+// add-ons and mods. Details by ID are not filtered.
 func (c *Client) Search(ctx context.Context, query string, limit int) ([]catalog.SourceGame, error) {
 	query = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
@@ -95,7 +100,7 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]catalog
 		return nil, fmt.Errorf("%w: search requires a query and a limit between 1 and %d", ErrRejected, maxResultLimit)
 	}
 	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(query)
-	return c.games(ctx, fmt.Sprintf(`search "%s"; fields %s; where version_parent = null; limit %d;`, escaped, gameFields, limit))
+	return c.games(ctx, fmt.Sprintf(`search "%s"; fields %s; where version_parent = null & game_type = (%s); limit %d;`, escaped, gameFields, searchGameTypes, limit))
 }
 
 // Games returns details for the given IGDB game IDs. Unknown IDs are omitted.

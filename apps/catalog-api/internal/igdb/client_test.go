@@ -121,7 +121,7 @@ func TestSearchMapsGamesWithCoversAndPlatforms(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer "+issuedToken(1) {
 			t.Error("IGDB request did not use the issued app token")
 		}
-		want := `search "Zelda \"Breath\" \\"; fields name,cover.image_id,platforms.name; where version_parent = null; limit 10;`
+		want := `search "Zelda \"Breath\" \\"; fields name,cover.image_id,platforms.name; where version_parent = null & game_type = (0,2,4,8,9,10,11); limit 10;`
 		if body := readBody(t, r); body != want {
 			t.Errorf("query = %q, want %q", body, want)
 		}

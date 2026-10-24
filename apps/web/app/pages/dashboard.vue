@@ -6,7 +6,7 @@ const { data: user, error, refresh, status } = await useFetch("/api/me");
 <template>
   <section>
     <h2>Dein Konto</h2>
-    <p v-if="status === 'pending'" role="status">Dein Konto wird geladen …</p>
+    <output v-if="status === 'pending'">Dein Konto wird geladen …</output>
     <div v-else-if="error" role="alert">
       <p>Dein Konto konnte gerade nicht geladen werden.</p>
       <button type="button" @click="refresh()">Erneut versuchen</button>

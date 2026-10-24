@@ -20,11 +20,7 @@ func TestLoadAcceptsTokenBoundaryAndRedactsDiagnostics(t *testing.T) {
 			if err != nil || config.Token() != token {
 				t.Fatal("valid service token was rejected or changed")
 			}
-			for _, format := range []string{"%v", "%+v", "%#v", "%s"} {
-				if strings.Contains(fmt.Sprintf(format, config), token) {
-					t.Errorf("configuration exposes service token using %s", format)
-				}
-			}
+			assertRedactedDiagnostics(t, config, token)
 		})
 	}
 }
@@ -53,5 +49,14 @@ func TestLoadRejectsMissingShortAndWhitespaceTokensWithoutLeakingValues(t *testi
 				t.Error("configuration error exposes service token")
 			}
 		})
+	}
+}
+
+func assertRedactedDiagnostics(t *testing.T, config Config, token string) {
+	t.Helper()
+	for _, format := range []string{"%v", "%+v", "%#v", "%s"} {
+		if strings.Contains(fmt.Sprintf(format, config), token) {
+			t.Errorf("configuration exposes service token using %s", format)
+		}
 	}
 }

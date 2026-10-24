@@ -75,49 +75,9 @@ func TestProtectedRoutesRequireExactlyOneValidBearerToken(t *testing.T) {
 		{"comma joined", []string{"Bearer " + token + ", Bearer " + token}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/games", nil)
-			req.Header.Set("X-Request-ID", "auth_rejected-123")
-			for _, value := range tc.headers {
-				req.Header.Add("Authorization", value)
-			}
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, req)
-			if response.Code != http.StatusUnauthorized {
-				t.Fatalf("status = %d, want 401", response.Code)
-			}
-			if response.Header().Get("Cache-Control") != "no-store" {
-				t.Error("authentication error must not be cached")
-			}
-			if response.Header().Get("WWW-Authenticate") != "Bearer" {
-				t.Error("missing bearer challenge")
-			}
-			if response.Header().Get("X-Request-ID") != "auth_rejected-123" {
-				t.Error("request ID was lost on authentication error")
-			}
-			if response.Header().Get("Content-Type") != "application/json" {
-				t.Error("unexpected authentication error media type")
-			}
-			var problem struct {
-				Error struct {
-					Code      string
-					Message   string
-					RequestID string
-				}
-			}
-			if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil {
-				t.Fatal(err)
-			}
-			if problem.Error.Code != "unauthorized" || problem.Error.Message != "Unauthorized" || problem.Error.RequestID != "auth_rejected-123" {
-				t.Error("unexpected authentication problem details")
-			}
-			if strings.Contains(response.Body.String(), token) {
-				t.Error("response leaked configured token")
-			}
-			for _, header := range tc.headers {
-				if len(header) > 10 && strings.Contains(response.Body.String(), header) {
-					t.Error("response reflected authorization header")
-				}
-			}
+			response := requestWithAuthorization(handler, tc.headers)
+			assertUnauthorizedResponse(t, response)
+			assertNoReflectedTokens(t, response.Body.String(), append([]string{token}, tc.headers...))
 		})
 	}
 }
@@ -169,5 +129,51 @@ func TestEmptyConfiguredTokenFailsClosed(t *testing.T) {
 	NewHandler("").ServeHTTP(response, req)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", response.Code)
+	}
+}
+
+func requestWithAuthorization(handler http.Handler, headers []string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/games", nil)
+	req.Header.Set("X-Request-ID", "auth_rejected-123")
+	for _, value := range headers {
+		req.Header.Add("Authorization", value)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, req)
+	return response
+}
+
+func assertUnauthorizedResponse(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", response.Code)
+	}
+	for name, expected := range map[string]string{
+		"Cache-Control":    "no-store",
+		"WWW-Authenticate": "Bearer",
+		"X-Request-ID":     "auth_rejected-123",
+		"Content-Type":     "application/json",
+	} {
+		if response.Header().Get(name) != expected {
+			t.Errorf("unexpected authentication response header %s", name)
+		}
+	}
+	var body struct {
+		Error struct{ Code, Message, RequestID string }
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Code != "unauthorized" || body.Error.Message != "Unauthorized" || body.Error.RequestID != "auth_rejected-123" {
+		t.Error("unexpected authentication error envelope")
+	}
+}
+
+func assertNoReflectedTokens(t *testing.T, body string, values []string) {
+	t.Helper()
+	for _, value := range values {
+		if len(value) > 10 && strings.Contains(body, value) {
+			t.Error("response reflected authentication material")
+		}
 	}
 }

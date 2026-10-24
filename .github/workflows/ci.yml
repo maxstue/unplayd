@@ -125,11 +125,12 @@ jobs:
     env:
       COMPOSE_PROJECT_NAME: unplayd-ci-${{ github.run_id }}-${{ github.run_attempt }}
       COMPOSE_FILE: compose.yaml:compose.test.yaml
+      CLERK_ISSUER: https://clerk.example
       # Disposable credentials for this isolated runner's test database only.
       POSTGRES_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-postgres
       USER_API_DB_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-user
       CATALOG_DB_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-catalog
-      CATALOG_SERVICE_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}-service
+      CATALOG_SERVICE_TOKEN: unplayd-ci-${{ github.run_id }}-${{ github.run_attempt }}-catalog-service-credential
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -137,6 +138,11 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.21.0
+      - name: Configure disposable Clerk-shaped keys
+        # No live Clerk account or production credentials are used by this stack.
+        run: |
+          printf 'NUXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_%s\n' "$(printf 'clerk.example$' | base64 -w0)" >> "$GITHUB_ENV"
+          printf 'NUXT_CLERK_SECRET_KEY=sk_test_%s\n' "$GITHUB_RUN_ID$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Build and start isolated stack
         run: docker compose --env-file /dev/null up --build --wait --wait-timeout 120
       - name: HTTP and PostgreSQL tests

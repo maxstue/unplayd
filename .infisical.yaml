@@ -1,0 +1,5 @@
+version: 1
+general:
+  domain: https://eu.infisical.com
+secrets-management:
+  project-id: 8ee8dd65-c1c0-4eea-b6cd-7711e63a8455

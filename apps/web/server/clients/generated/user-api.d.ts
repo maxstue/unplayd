@@ -157,6 +157,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve the authenticated Clerk subject to its local user
+         * @description Identity comes only from the verified session token. User IDs in headers, query or body never select the user.
+         */
+        get: operations["getCurrentUser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -213,6 +233,11 @@ export interface components {
         NextGame: {
             /** @description Null when no matching own backlog entry exists; selection never changes state. */
             entry: components["schemas"]["LibraryEntry"] | null;
+        };
+        CurrentUser: {
+            /** Format: uuid */
+            id: string;
+            clerkSubject: string;
         };
         /** @example trace_123-ABC */
         RequestId: string;
@@ -788,6 +813,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NextGame"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getCurrentUser: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrentUser"];
                 };
             };
             400: components["responses"]["BadRequest"];

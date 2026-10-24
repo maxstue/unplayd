@@ -29,6 +29,7 @@ dependencies {
     implementation("org.postgresql:postgresql:42.7.14")
     testImplementation("io.ktor:ktor-server-test-host")
     testImplementation(kotlin("test-junit5"))
+    testImplementation("org.testcontainers:testcontainers-postgresql:2.0.5")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

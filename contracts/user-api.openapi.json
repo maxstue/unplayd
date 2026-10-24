@@ -771,6 +771,53 @@
         },
         "description": "All matching backlog entries are equally likely, across the whole result set. Exclude the previous game only when alternatives exist. A single candidate remains selectable. No candidate returns entry:null. Only PUT /library/{gameId}/status changes status."
       }
+    },
+    "/me": {
+      "get": {
+        "operationId": "getCurrentUser",
+        "summary": "Resolve the authenticated Clerk subject to its local user",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        },
+        "description": "Identity comes only from the verified session token. User IDs in headers, query or body never select the user."
+      }
     }
   },
   "security": [
@@ -955,6 +1002,21 @@
           }
         },
         "required": ["entry"]
+      },
+      "CurrentUser": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "clerkSubject": {
+            "type": "string",
+            "pattern": "^user_[a-zA-Z0-9]+$"
+          }
+        },
+        "required": ["id", "clerkSubject"]
       }
     }
   }

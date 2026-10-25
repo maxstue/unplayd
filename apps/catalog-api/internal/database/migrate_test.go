@@ -64,7 +64,15 @@ func newPostgresFixture(t *testing.T) postgresFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := openFixtureDatabase(t, config.connectionString())
+	db, err := Open(t.Context(), config)
+	if err != nil {
+		t.Fatalf("open catalog connection: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close PostgreSQL connection: %v", err)
+		}
+	})
 	var restricted bool
 	if err := db.QueryRowContext(t.Context(), `SELECT current_user = 'catalog'
 		AND NOT rolsuper AND NOT rolcreaterole AND NOT rolcreatedb AND NOT rolbypassrls
@@ -145,7 +153,7 @@ func assertSQLTrue(t *testing.T, db *sql.DB, query string, args ...any) {
 
 func TestMigrateUpgradesAndRepeatsWithoutChangingCatalogIdentity(t *testing.T) {
 	fixture := newPostgresFixture(t)
-	v1, v2 := uint(1), uint(2)
+	v1, latest := uint(1), uint(3)
 	applyMigrations(t, fixture.config, &v1)
 	gameID := insertGame(t, fixture.db, "V1 fixture game")
 	var createdAt, updatedAt time.Time
@@ -160,20 +168,20 @@ func TestMigrateUpgradesAndRepeatsWithoutChangingCatalogIdentity(t *testing.T) {
 
 	t.Run("repeat latest and explicit target preserve data and external identity", func(t *testing.T) {
 		applyMigrations(t, fixture.config, nil)
-		applyMigrations(t, fixture.config, &v2)
+		applyMigrations(t, fixture.config, &latest)
 		assertSQLTrue(t, fixture.db, `SELECT count(*) = 1 FROM catalog.games`)
 		assertSQLTrue(t, fixture.db, `SELECT title = 'V1 fixture game' AND is_active
 			AND created_at = $2 AND updated_at = $3 FROM catalog.games WHERE id = $1`, gameID, createdAt, updatedAt)
 		assertSQLTrue(t, fixture.db, `SELECT count(*) = 1 AND bool_and(game_id = $1::uuid)
 			FROM catalog.external_game_ids WHERE source = 'igdb' AND external_id = '42'`, gameID)
-		assertSQLTrue(t, fixture.db, `SELECT version = 2 AND NOT dirty FROM catalog.schema_migrations`)
+		assertSQLTrue(t, fixture.db, `SELECT version = 3 AND NOT dirty FROM catalog.schema_migrations`)
 	})
 	t.Run("downgrade is refused without changing version or data", func(t *testing.T) {
 		err := Migrate(t.Context(), fixture.config, &v1)
-		if err == nil || !strings.Contains(err.Error(), "refusing downgrade from version 2") {
+		if err == nil || !strings.Contains(err.Error(), "refusing downgrade from version 3") {
 			t.Fatalf("expected forward-only migration error, got %v", err)
 		}
-		assertSQLTrue(t, fixture.db, `SELECT version = 2 AND NOT dirty FROM catalog.schema_migrations`)
+		assertSQLTrue(t, fixture.db, `SELECT version = 3 AND NOT dirty FROM catalog.schema_migrations`)
 		assertSQLTrue(t, fixture.db, `SELECT count(*) = 1 FROM catalog.external_game_ids WHERE game_id = $1`, gameID)
 	})
 }
@@ -230,6 +238,37 @@ func TestGamePlatformsEnforceLocalRelationships(t *testing.T) {
 	assertSQLTrue(t, fixture.db, `SELECT count(*) = 1 FROM catalog.game_platforms WHERE game_id = $1 AND platform_id = $2`, gameID, platformID)
 }
 
+func TestExternalPlatformIDsEnforceSourceIdentity(t *testing.T) {
+	fixture := newPostgresFixture(t)
+	applyMigrations(t, fixture.config, nil)
+	var platformID, otherPlatformID string
+	if err := fixture.db.QueryRowContext(t.Context(), `INSERT INTO catalog.platforms(name) VALUES ('PC') RETURNING id`).Scan(&platformID); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.QueryRowContext(t.Context(), `INSERT INTO catalog.platforms(name) VALUES ('Switch') RETURNING id`).Scan(&otherPlatformID); err != nil {
+		t.Fatal(err)
+	}
+	executeSQL(t, fixture.db, `INSERT INTO catalog.external_platform_ids(source, external_id, platform_id)
+		VALUES ('igdb', '6', $1), ('steam', '6', $1)`, platformID)
+	for _, tc := range []struct {
+		name, source, externalID, platformID, code string
+	}{
+		{"reassign existing external identity", "igdb", "6", otherPlatformID, "23505"},
+		{"unknown platform", "igdb", "7", "10000000-0000-4000-8000-000000000099", "23503"},
+		{"empty source", "", "8", platformID, "23514"},
+		{"empty external identity", "igdb", "", platformID, "23514"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertPostgresError(t, fixture.db, tc.code, `INSERT INTO catalog.external_platform_ids(source, external_id, platform_id)
+				VALUES ($1, $2, $3)`, tc.source, tc.externalID, tc.platformID)
+		})
+	}
+	t.Run("mapped platform cannot be deleted", func(t *testing.T) {
+		assertPostgresError(t, fixture.db, "23001", `DELETE FROM catalog.platforms WHERE id = $1`, platformID)
+	})
+	assertSQLTrue(t, fixture.db, `SELECT count(*) = 2 AND bool_and(platform_id = $1::uuid) FROM catalog.external_platform_ids`, platformID)
+}
+
 func TestGameDeactivationPreservesIdentityAndRejectsHardDelete(t *testing.T) {
 	fixture := newPostgresFixture(t)
 	applyMigrations(t, fixture.config, nil)
@@ -278,8 +317,22 @@ func TestCatalogRoleIsIsolatedBySharedPostgresBootstrap(t *testing.T) {
 	}
 	t.Run("non catalog migration role is rejected", func(t *testing.T) {
 		err := Migrate(t.Context(), fixture.foreignConfig, nil)
-		if err == nil || !strings.Contains(err.Error(), "migration connection must use the catalog role") {
+		if err == nil || !strings.Contains(err.Error(), "connection must use the catalog role") {
 			t.Fatalf("expected migration role rejection, got %v", err)
+		}
+	})
+	t.Run("non catalog connection role is rejected", func(t *testing.T) {
+		db, err := Open(t.Context(), fixture.foreignConfig)
+		if db != nil || err == nil || !strings.Contains(err.Error(), "connection must use the catalog role") {
+			t.Fatalf("expected connection role rejection, got %v", err)
+		}
+	})
+	t.Run("connection failures redact the password", func(t *testing.T) {
+		wrong := fixture.config
+		wrong.password = rand.Text()
+		db, err := Open(t.Context(), wrong)
+		if db != nil || err == nil || strings.Contains(err.Error(), wrong.password) {
+			t.Fatalf("expected redacted connection failure, got %v", err)
 		}
 	})
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/maxstue/unplayd/apps/catalog-api/internal/auth"
 	"github.com/maxstue/unplayd/apps/catalog-api/internal/database"
 	"github.com/maxstue/unplayd/apps/catalog-api/internal/httpapi"
+	"github.com/maxstue/unplayd/apps/catalog-api/internal/igdb"
 )
 
 func main() {
@@ -23,6 +24,11 @@ func main() {
 	}
 	if _, err := database.Load(os.Getenv); err != nil {
 		slog.Error("invalid database configuration", "error", err)
+		os.Exit(1)
+	}
+	igdbConfig, err := igdb.Load(os.Getenv)
+	if err != nil {
+		slog.Error("invalid IGDB configuration", "error", err)
 		os.Exit(1)
 	}
 	port := os.Getenv("PORT")
@@ -50,7 +56,7 @@ func main() {
 			slog.Error("shutdown failed", "error", err)
 		}
 	}()
-	slog.Info("catalog-api listening", "port", port)
+	slog.Info("catalog-api listening", "port", port, "igdbEnabled", igdbConfig.Enabled())
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		slog.Error("server failed", "error", err)
 		os.Exit(1)

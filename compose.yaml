@@ -41,6 +41,8 @@ services:
       DATABASE_USER: catalog
       DATABASE_PASSWORD: ${CATALOG_DB_PASSWORD:?Set CATALOG_DB_PASSWORD via Infisical or environment}
       CATALOG_SERVICE_TOKEN: ${CATALOG_SERVICE_TOKEN:?Set CATALOG_SERVICE_TOKEN via Infisical or environment}
+      IGDB_CLIENT_ID: ${IGDB_CLIENT_ID:-}
+      IGDB_CLIENT_SECRET: ${IGDB_CLIENT_SECRET:-}
     ports:
       - "127.0.0.1:8446:8446"
     depends_on:

@@ -103,7 +103,7 @@ func platformNames(game Game) []string {
 }
 
 var zelda = SourceGame{
-	Source: "igdb", ExternalID: "7346", Title: "The Legend of Zelda: Breath of the Wild",
+	Source: "igdb", ExternalID: "7346", Title: "The Legend of Zelda: Breath of the Wild", Kind: KindGame,
 	CoverURL:  "https://images.igdb.com/igdb/image/upload/t_cover_big/co3p2d.jpg",
 	Platforms: []SourcePlatform{{ExternalID: "130", Name: "Nintendo Switch"}, {ExternalID: "41", Name: "Wii U"}},
 }
@@ -172,8 +172,8 @@ func assertMatchesSource(t *testing.T, game Game, source SourceGame) {
 
 func TestUpsertReusesPlatformsAndUpdatesTheirNames(t *testing.T) {
 	store, db := newTestStore(t)
-	witcher := SourceGame{Source: "igdb", ExternalID: "1942", Title: "The Witcher 3", Platforms: []SourcePlatform{{ExternalID: "6", Name: "PC"}}}
-	portal := SourceGame{Source: "igdb", ExternalID: "72", Title: "Portal 2", Platforms: []SourcePlatform{{ExternalID: "6", Name: "PC (Microsoft Windows)"}}}
+	witcher := SourceGame{Source: "igdb", ExternalID: "1942", Title: "The Witcher 3", Kind: KindGame, Platforms: []SourcePlatform{{ExternalID: "6", Name: "PC"}}}
+	portal := SourceGame{Source: "igdb", ExternalID: "72", Title: "Portal 2", Kind: KindGame, Platforms: []SourcePlatform{{ExternalID: "6", Name: "PC (Microsoft Windows)"}}}
 	first := upsertOne(t, store, witcher)
 	second := upsertOne(t, store, portal)
 	if first.Platforms[0].ID != second.Platforms[0].ID {
@@ -190,7 +190,7 @@ func TestUpsertNormalizesBatches(t *testing.T) {
 	store, db := newTestStore(t)
 	duplicate := zelda
 	duplicate.Title = "Ignored duplicate"
-	other := SourceGame{Source: "steam", ExternalID: "7346", Title: "  Same ID from another source  ",
+	other := SourceGame{Source: "steam", ExternalID: "7346", Title: "  Same ID from another source  ", Kind: KindGame,
 		Platforms: []SourcePlatform{{ExternalID: "1", Name: "PC"}, {ExternalID: "1", Name: "PC"}}}
 	games, err := store.Upsert(t.Context(), []SourceGame{zelda, duplicate, other})
 	if err != nil {
@@ -217,8 +217,8 @@ func TestUpsertRejectsInvalidSourceGamesAtomically(t *testing.T) {
 		{"missing source", SourceGame{ExternalID: "1", Title: "Game"}},
 		{"missing external ID", SourceGame{Source: "igdb", Title: "Game"}},
 		{"blank title", SourceGame{Source: "igdb", ExternalID: "1", Title: "  "}},
-		{"platform without ID", SourceGame{Source: "igdb", ExternalID: "1", Title: "Game", Platforms: []SourcePlatform{{Name: "PC"}}}},
-		{"platform without name", SourceGame{Source: "igdb", ExternalID: "1", Title: "Game", Platforms: []SourcePlatform{{ExternalID: "6"}}}},
+		{"platform without ID", SourceGame{Source: "igdb", ExternalID: "1", Title: "Game", Kind: KindGame, Platforms: []SourcePlatform{{Name: "PC"}}}},
+		{"platform without name", SourceGame{Source: "igdb", ExternalID: "1", Title: "Game", Kind: KindGame, Platforms: []SourcePlatform{{ExternalID: "6"}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := store.Upsert(t.Context(), []SourceGame{zelda, tc.game}); !errors.Is(err, ErrInvalidRequest) {
@@ -231,7 +231,7 @@ func TestUpsertRejectsInvalidSourceGamesAtomically(t *testing.T) {
 
 func TestConcurrentUpsertsCreateOneCatalogEntry(t *testing.T) {
 	store, db := newTestStore(t)
-	reversed := SourceGame{Source: "igdb", ExternalID: "1942", Title: "The Witcher 3",
+	reversed := SourceGame{Source: "igdb", ExternalID: "1942", Title: "The Witcher 3", Kind: KindGame,
 		Platforms: []SourcePlatform{{ExternalID: "41", Name: "Wii U"}, {ExternalID: "130", Name: "Nintendo Switch"}}}
 	ids := make(chan string, 16)
 	var wg sync.WaitGroup

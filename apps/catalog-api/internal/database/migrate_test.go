@@ -134,7 +134,7 @@ func assertPostgresError(t *testing.T, db *sql.DB, code, query string, args ...a
 func insertGame(t *testing.T, db *sql.DB, title string) string {
 	t.Helper()
 	var id string
-	if err := db.QueryRowContext(t.Context(), `INSERT INTO catalog.games(title) VALUES ($1) RETURNING id`, title).Scan(&id); err != nil {
+	if err := db.QueryRowContext(t.Context(), `INSERT INTO catalog.games(title, kind) VALUES ($1, 'game') RETURNING id`, title).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	return id
@@ -153,16 +153,17 @@ func assertSQLTrue(t *testing.T, db *sql.DB, query string, args ...any) {
 
 func TestMigrateUpgradesAndRepeatsWithoutChangingCatalogIdentity(t *testing.T) {
 	fixture := newPostgresFixture(t)
-	v1, latest := uint(1), uint(3)
+	v1, latest := uint(1), uint(4)
 	applyMigrations(t, fixture.config, &v1)
-	gameID := insertGame(t, fixture.db, "V1 fixture game")
+	var gameID string
 	var createdAt, updatedAt time.Time
-	if err := fixture.db.QueryRowContext(t.Context(), `SELECT created_at, updated_at FROM catalog.games WHERE id = $1`, gameID).Scan(&createdAt, &updatedAt); err != nil {
+	if err := fixture.db.QueryRowContext(t.Context(), `INSERT INTO catalog.games(title) VALUES ('V1 fixture game')
+		RETURNING id, created_at, updated_at`).Scan(&gameID, &createdAt, &updatedAt); err != nil {
 		t.Fatal(err)
 	}
 	assertSQLTrue(t, fixture.db, `SELECT version = 1 AND NOT dirty FROM catalog.schema_migrations`)
 	applyMigrations(t, fixture.config, nil)
-	assertSQLTrue(t, fixture.db, `SELECT title = 'V1 fixture game' AND is_active
+	assertSQLTrue(t, fixture.db, `SELECT title = 'V1 fixture game' AND is_active AND kind = 'game' AND parent_id IS NULL
 		AND created_at = $2 AND updated_at = $3 FROM catalog.games WHERE id = $1`, gameID, createdAt, updatedAt)
 	executeSQL(t, fixture.db, `INSERT INTO catalog.external_game_ids(source, external_id, game_id) VALUES ('igdb', '42', $1)`, gameID)
 
@@ -174,14 +175,14 @@ func TestMigrateUpgradesAndRepeatsWithoutChangingCatalogIdentity(t *testing.T) {
 			AND created_at = $2 AND updated_at = $3 FROM catalog.games WHERE id = $1`, gameID, createdAt, updatedAt)
 		assertSQLTrue(t, fixture.db, `SELECT count(*) = 1 AND bool_and(game_id = $1::uuid)
 			FROM catalog.external_game_ids WHERE source = 'igdb' AND external_id = '42'`, gameID)
-		assertSQLTrue(t, fixture.db, `SELECT version = 3 AND NOT dirty FROM catalog.schema_migrations`)
+		assertSQLTrue(t, fixture.db, `SELECT version = 4 AND NOT dirty FROM catalog.schema_migrations`)
 	})
 	t.Run("downgrade is refused without changing version or data", func(t *testing.T) {
 		err := Migrate(t.Context(), fixture.config, &v1)
-		if err == nil || !strings.Contains(err.Error(), "refusing downgrade from version 3") {
+		if err == nil || !strings.Contains(err.Error(), "refusing downgrade from version 4") {
 			t.Fatalf("expected forward-only migration error, got %v", err)
 		}
-		assertSQLTrue(t, fixture.db, `SELECT version = 3 AND NOT dirty FROM catalog.schema_migrations`)
+		assertSQLTrue(t, fixture.db, `SELECT version = 4 AND NOT dirty FROM catalog.schema_migrations`)
 		assertSQLTrue(t, fixture.db, `SELECT count(*) = 1 FROM catalog.external_game_ids WHERE game_id = $1`, gameID)
 	})
 }
@@ -284,6 +285,91 @@ func TestGameDeactivationPreservesIdentityAndRejectsHardDelete(t *testing.T) {
 			FROM catalog.games g JOIN catalog.external_game_ids e ON e.game_id = g.id
 			WHERE g.id = $1 AND e.source = 'igdb' AND e.external_id = '42'`, gameID)
 	})
+}
+
+func insertChild(t *testing.T, db *sql.DB, title, parentID string) string {
+	t.Helper()
+	var id string
+	if err := db.QueryRowContext(t.Context(), `INSERT INTO catalog.games(title, kind, parent_id) VALUES ($1, 'dlc', $2) RETURNING id`, title, parentID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestGameHierarchyKeepsASingleLevel(t *testing.T) {
+	fixture := newPostgresFixture(t)
+	applyMigrations(t, fixture.config, nil)
+	parentID := insertGame(t, fixture.db, "Parent")
+	otherParentID := insertGame(t, fixture.db, "Other parent")
+	childID := insertChild(t, fixture.db, "Child", parentID)
+	for _, tc := range []struct {
+		name, code, query string
+		args              []any
+	}{
+		{"kind is required", "23502", `INSERT INTO catalog.games(title) VALUES ('No kind')`, nil},
+		{"unknown kind", "23514", `INSERT INTO catalog.games(title, kind) VALUES ('Sequel', 'sequel')`, nil},
+		{"unknown parent", "23503", `INSERT INTO catalog.games(title, kind, parent_id) VALUES ('Orphan', 'dlc', '10000000-0000-4000-8000-000000000099')`, nil},
+		{"self reference", "23514", `UPDATE catalog.games SET parent_id = id WHERE id = $1`, []any{parentID}},
+		{"child of a child", "23514", `INSERT INTO catalog.games(title, kind, parent_id) VALUES ('Grandchild', 'dlc', $1)`, []any{childID}},
+		{"parent with children gets a parent", "23514", `UPDATE catalog.games SET parent_id = $2 WHERE id = $1`, []any{parentID, otherParentID}},
+		{"cycle", "23514", `UPDATE catalog.games SET parent_id = CASE id WHEN $1 THEN $2 ELSE $1 END WHERE id IN ($1, $2)`, []any{otherParentID, parentID}},
+		{"parent is not hard deleted", "P0001", `DELETE FROM catalog.games WHERE id = $1`, []any{parentID}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertPostgresError(t, fixture.db, tc.code, tc.query, tc.args...)
+		})
+	}
+	t.Run("a transaction may re-parent in any order", func(t *testing.T) {
+		tx, err := fixture.db.BeginTx(t.Context(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		for _, query := range []string{
+			`UPDATE catalog.games SET parent_id = $2 WHERE id = $1`,
+			`UPDATE catalog.games SET parent_id = $2 WHERE parent_id = $1 AND id <> $2`,
+		} {
+			if _, err := tx.ExecContext(t.Context(), query, parentID, otherParentID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("intermediate states must be allowed until commit: %v", err)
+		}
+		assertSQLTrue(t, fixture.db, `SELECT count(*) = 2 FROM catalog.games WHERE parent_id = $1`, otherParentID)
+	})
+}
+
+func TestConcurrentHierarchyChangesCannotNestGames(t *testing.T) {
+	fixture := newPostgresFixture(t)
+	applyMigrations(t, fixture.config, nil)
+	a, b, c := insertGame(t, fixture.db, "A"), insertGame(t, fixture.db, "B"), insertGame(t, fixture.db, "C")
+	first, err := fixture.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Rollback()
+	second, err := fixture.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Rollback()
+	// Each change is valid on its own, but together A would sit two levels deep.
+	if _, err := first.ExecContext(t.Context(), `UPDATE catalog.games SET parent_id = $2 WHERE id = $1`, a, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.ExecContext(t.Context(), `UPDATE catalog.games SET parent_id = $2 WHERE id = $1`, b, c); err != nil {
+		t.Fatal(err)
+	}
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- first.Commit() }()
+	secondErr := second.Commit()
+	firstErr := <-firstDone
+	if (firstErr == nil) == (secondErr == nil) {
+		t.Fatalf("exactly one transaction must fail: first %v, second %v", firstErr, secondErr)
+	}
+	assertSQLTrue(t, fixture.db, `SELECT count(*) = 0 FROM catalog.games child JOIN catalog.games parent ON parent.id = child.parent_id
+		WHERE parent.parent_id IS NOT NULL`)
 }
 
 func TestCatalogRoleIsIsolatedBySharedPostgresBootstrap(t *testing.T) {

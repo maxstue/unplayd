@@ -111,15 +111,7 @@ var zelda = SourceGame{
 func TestUpsertIsRepeatableAndKeepsCatalogIdentity(t *testing.T) {
 	store, db := newTestStore(t)
 	first := upsertOne(t, store, zelda)
-	if first.Title != zelda.Title || first.CoverURL == nil || *first.CoverURL != zelda.CoverURL || !first.IsActive {
-		t.Fatalf("unexpected stored game: %+v", first)
-	}
-	if names := platformNames(first); len(names) != 2 || names[0] != "Nintendo Switch" || names[1] != "Wii U" {
-		t.Fatalf("platforms = %v", names)
-	}
-	if first.UpdatedAt.Location().String() != "UTC" {
-		t.Fatal("updatedAt must be UTC")
-	}
+	assertStoredZelda(t, first)
 
 	t.Run("unchanged metadata keeps UUID and timestamp", func(t *testing.T) {
 		again := upsertOne(t, store, zelda)
@@ -152,11 +144,29 @@ func TestUpsertIsRepeatableAndKeepsCatalogIdentity(t *testing.T) {
 			if after.ID != first.ID || !after.UpdatedAt.After(before.UpdatedAt) {
 				t.Fatalf("metadata change: id %s -> %s, updatedAt %v -> %v", first.ID, after.ID, before.UpdatedAt, after.UpdatedAt)
 			}
-			if after.Title != changed.Title || (after.CoverURL == nil) != (changed.CoverURL == "") || len(after.Platforms) != len(changed.Platforms) {
-				t.Fatalf("stored metadata does not match the source: %+v", after)
-			}
+			assertMatchesSource(t, after, changed)
 			assertCount(t, db, 1, `SELECT count(*) FROM catalog.games`)
 		})
+	}
+}
+
+func assertStoredZelda(t *testing.T, game Game) {
+	t.Helper()
+	if game.Title != zelda.Title || game.CoverURL == nil || *game.CoverURL != zelda.CoverURL || !game.IsActive {
+		t.Fatalf("unexpected stored game: %+v", game)
+	}
+	if names := platformNames(game); len(names) != 2 || names[0] != "Nintendo Switch" || names[1] != "Wii U" {
+		t.Fatalf("platforms = %v", names)
+	}
+	if game.UpdatedAt.Location().String() != "UTC" {
+		t.Fatal("updatedAt must be UTC")
+	}
+}
+
+func assertMatchesSource(t *testing.T, game Game, source SourceGame) {
+	t.Helper()
+	if game.Title != source.Title || (game.CoverURL == nil) != (source.CoverURL == "") || len(game.Platforms) != len(source.Platforms) {
+		t.Fatalf("stored metadata does not match the source: %+v", game)
 	}
 }
 

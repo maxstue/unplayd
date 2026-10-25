@@ -210,8 +210,10 @@ func TestAccessTokenIsCachedUntilShortlyBeforeExpiry(t *testing.T) {
 		}
 		return games[0].Title
 	}
-	if search() != issuedToken(1) || search() != issuedToken(1) {
-		t.Fatal("cached token was not reused")
+	for range 2 {
+		if search() != issuedToken(1) {
+			t.Fatal("cached token was not reused")
+		}
 	}
 	now = now.Add(time.Hour - tokenRenewalMargin - time.Second)
 	if search() != issuedToken(1) {

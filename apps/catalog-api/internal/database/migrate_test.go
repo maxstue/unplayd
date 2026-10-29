@@ -153,7 +153,7 @@ func assertSQLTrue(t *testing.T, db *sql.DB, query string, args ...any) {
 
 func TestMigrateUpgradesAndRepeatsWithoutChangingCatalogIdentity(t *testing.T) {
 	fixture := newPostgresFixture(t)
-	v1, latest := uint(1), uint(4)
+	v1, latest := uint(1), uint(6)
 	applyMigrations(t, fixture.config, &v1)
 	var gameID string
 	var createdAt, updatedAt time.Time
@@ -175,14 +175,14 @@ func TestMigrateUpgradesAndRepeatsWithoutChangingCatalogIdentity(t *testing.T) {
 			AND created_at = $2 AND updated_at = $3 FROM catalog.games WHERE id = $1`, gameID, createdAt, updatedAt)
 		assertSQLTrue(t, fixture.db, `SELECT count(*) = 1 AND bool_and(game_id = $1::uuid)
 			FROM catalog.external_game_ids WHERE source = 'igdb' AND external_id = '42'`, gameID)
-		assertSQLTrue(t, fixture.db, `SELECT version = 4 AND NOT dirty FROM catalog.schema_migrations`)
+		assertSQLTrue(t, fixture.db, `SELECT version = 6 AND NOT dirty FROM catalog.schema_migrations`)
 	})
 	t.Run("downgrade is refused without changing version or data", func(t *testing.T) {
 		err := Migrate(t.Context(), fixture.config, &v1)
-		if err == nil || !strings.Contains(err.Error(), "refusing downgrade from version 4") {
+		if err == nil || !strings.Contains(err.Error(), "refusing downgrade from version 6") {
 			t.Fatalf("expected forward-only migration error, got %v", err)
 		}
-		assertSQLTrue(t, fixture.db, `SELECT version = 4 AND NOT dirty FROM catalog.schema_migrations`)
+		assertSQLTrue(t, fixture.db, `SELECT version = 6 AND NOT dirty FROM catalog.schema_migrations`)
 		assertSQLTrue(t, fixture.db, `SELECT count(*) = 1 FROM catalog.external_game_ids WHERE game_id = $1`, gameID)
 	})
 }
@@ -284,6 +284,30 @@ func TestGameDeactivationPreservesIdentityAndRejectsHardDelete(t *testing.T) {
 		assertSQLTrue(t, fixture.db, `SELECT NOT g.is_active AND g.title = 'Lifecycle fixture' AND e.game_id = $1::uuid
 			FROM catalog.games g JOIN catalog.external_game_ids e ON e.game_id = g.id
 			WHERE g.id = $1 AND e.source = 'igdb' AND e.external_id = '42'`, gameID)
+	})
+}
+
+func TestSearchCacheReferencesStoredGames(t *testing.T) {
+	fixture := newPostgresFixture(t)
+	applyMigrations(t, fixture.config, nil)
+	gameID := insertGame(t, fixture.db, "Search fixture")
+	executeSQL(t, fixture.db, `INSERT INTO catalog.search_queries(query_key, refreshed_at) VALUES ('botw', now())`)
+	executeSQL(t, fixture.db, `INSERT INTO catalog.search_query_games(query_key, game_id) VALUES ('botw', $1)`, gameID)
+	for _, tc := range []struct{ name, code, query string }{
+		{"empty key", "23514", `INSERT INTO catalog.search_queries(query_key, refreshed_at) VALUES ('', now())`},
+		{"oversized key", "23514", `INSERT INTO catalog.search_queries(query_key, refreshed_at) VALUES (repeat('a', 401), now())`},
+		{"unknown search", "23503", `INSERT INTO catalog.search_query_games(query_key, game_id) VALUES ('zelda', '` + gameID + `')`},
+		{"unknown game", "23503", `INSERT INTO catalog.search_query_games(query_key, game_id) VALUES ('botw', gen_random_uuid())`},
+		{"duplicate game", "23505", `INSERT INTO catalog.search_query_games(query_key, game_id) VALUES ('botw', '` + gameID + `')`},
+	} {
+		t.Run(tc.name+" is rejected", func(t *testing.T) {
+			assertPostgresError(t, fixture.db, tc.code, tc.query)
+		})
+	}
+	t.Run("dropping a search removes its results but not the game", func(t *testing.T) {
+		executeSQL(t, fixture.db, `DELETE FROM catalog.search_queries WHERE query_key = 'botw'`)
+		assertSQLTrue(t, fixture.db, `SELECT count(*) = 0 FROM catalog.search_query_games`)
+		assertSQLTrue(t, fixture.db, `SELECT count(*) = 1 FROM catalog.games WHERE id = $1`, gameID)
 	})
 }
 

@@ -12,4 +12,6 @@ CREATE SCHEMA catalog AUTHORIZATION catalog;
 REVOKE ALL ON SCHEMA user_data, catalog FROM PUBLIC;
 ALTER ROLE user_api SET search_path = user_data;
 ALTER ROLE catalog SET search_path = catalog;
+-- Only superusers may create extensions here; the catalog title search index needs trigrams.
+CREATE EXTENSION pg_trgm SCHEMA catalog;
 SQL

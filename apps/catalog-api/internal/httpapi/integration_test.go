@@ -2,7 +2,10 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -66,7 +69,15 @@ func (p *providerStub) searchCount() int {
 	return p.searches
 }
 
-func TestCatalogRoutesServeStoredGamesThroughPostgreSQL(t *testing.T) {
+// routeFixture serves the catalog routes from PostgreSQL with a stub provider.
+type routeFixture struct {
+	db       *sql.DB
+	provider *providerStub
+	handler  http.Handler
+	witcher  searchHitDTO
+}
+
+func newRouteFixture(t *testing.T) *routeFixture {
 	db := databasetest.Open(t)
 	provider := &providerStub{games: []catalog.SourceGame{
 		{Source: "igdb", ExternalID: "1942", Title: "The Witcher 3: Wild Hunt", Kind: catalog.KindGame,
@@ -80,87 +91,116 @@ func TestCatalogRoutesServeStoredGamesThroughPostgreSQL(t *testing.T) {
 	policy := catalog.SearchPolicy{FreshFor: time.Hour, Wait: 5 * time.Second, RefreshTimeout: 10 * time.Second, Cooldown: time.Minute}
 	service := catalog.NewService(store, catalog.NewImporter(provider, store), policy, slog.New(slog.DiscardHandler))
 	t.Cleanup(service.Wait)
-	handler := NewHandler(testToken, service, slog.New(slog.DiscardHandler))
+	return &routeFixture{db: db, provider: provider, handler: NewHandler(testToken, service, slog.New(slog.DiscardHandler))}
+}
 
-	page := decode[gamePageDTO](t, serve(handler, http.MethodGet, "/games?query=witcher+3", ""))
-	if len(page.Items) != 1 || page.Items[0].Game.Title != "The Witcher 3: Wild Hunt" || page.NextCursor != nil {
-		t.Fatalf("page = %+v", page)
-	}
-	witcher := page.Items[0]
-	if len(witcher.MatchedChildren) != 2 || len(witcher.ChildCounts) != 1 || witcher.ChildCounts[0].Count != 2 || len(witcher.Game.Platforms) != 1 {
-		t.Fatalf("witcher hit = %+v", witcher)
-	}
+func (f *routeFixture) get(target string) *httptest.ResponseRecorder {
+	return serve(f.handler, http.MethodGet, target, "")
+}
 
-	t.Run("search pages with an opaque cursor", func(t *testing.T) {
-		decode[gamePageDTO](t, serve(handler, http.MethodGet, "/games?query=witcher&limit=50", ""))
-		var seen []string
-		target := "/games?query=witcher&limit=2"
-		for target != "" {
-			page := decode[gamePageDTO](t, serve(handler, http.MethodGet, target, ""))
-			for _, item := range page.Items {
-				seen = append(seen, item.Game.Title)
-			}
-			target = ""
-			if page.NextCursor != nil {
-				target = "/games?query=witcher&limit=2&cursor=" + url.QueryEscape(*page.NextCursor)
-			}
+func (f *routeFixture) batch(t *testing.T, ids ...string) *httptest.ResponseRecorder {
+	body, err := json.Marshal(map[string][]string{"gameIds": append([]string{}, ids...)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return serve(f.handler, http.MethodPost, "/games/batch", string(body))
+}
+
+func (f *routeFixture) exec(t *testing.T, query string, args ...any) {
+	t.Helper()
+	if _, err := f.db.ExecContext(t.Context(), query, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertEqual[T comparable](t *testing.T, name string, got, want T) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("%s = %v, want %v", name, got, want)
+	}
+}
+
+func TestCatalogRoutesServeStoredGamesThroughPostgreSQL(t *testing.T) {
+	fixture := newRouteFixture(t)
+	page := decode[gamePageDTO](t, fixture.get("/games?query=witcher+3"))
+	assertEqual(t, "hits", len(page.Items), 1)
+	assertEqual(t, "next cursor", page.NextCursor, nil)
+	fixture.witcher = page.Items[0]
+	assertEqual(t, "title", fixture.witcher.Game.Title, "The Witcher 3: Wild Hunt")
+	assertEqual(t, "matched children", len(fixture.witcher.MatchedChildren), 2)
+	assertEqual(t, "child counts", fmt.Sprint(fixture.witcher.ChildCounts), "[{expansion 2}]")
+	assertEqual(t, "platforms", len(fixture.witcher.Game.Platforms), 1)
+
+	t.Run("search pages with an opaque cursor", fixture.testPagination)
+	t.Run("detail validates the UUID and lists children", fixture.testDetail)
+	t.Run("batch reports missing and inactive IDs explicitly", fixture.testBatch)
+	t.Run("provider outage keeps stored games readable", fixture.testProviderOutage)
+	t.Run("every catalog route requires the service token", fixture.testAuthentication)
+}
+
+func (f *routeFixture) testPagination(t *testing.T) {
+	decode[gamePageDTO](t, f.get("/games?query=witcher&limit=50"))
+	var seen []string
+	target := "/games?query=witcher&limit=2"
+	for target != "" {
+		page := decode[gamePageDTO](t, f.get(target))
+		for _, item := range page.Items {
+			seen = append(seen, item.Game.Title)
 		}
-		if want := []string{"The Witcher", "The Witcher 2: Assassins of Kings", "The Witcher 3: Wild Hunt"}; !slices.Equal(seen, want) {
-			t.Fatalf("paged titles = %v, want %v", seen, want)
+		target = ""
+		if page.NextCursor != nil {
+			target = "/games?query=witcher&limit=2&cursor=" + url.QueryEscape(*page.NextCursor)
 		}
-		assertError(t, serve(handler, http.MethodGet, "/games?query=zelda&limit=2&cursor=bm90LWEtY3Vyc29y", ""), http.StatusBadRequest, "invalid_request")
-	})
-	t.Run("detail validates the UUID and lists children", func(t *testing.T) {
-		detail := decode[gameDetailDTO](t, serve(handler, http.MethodGet, "/games/"+strings.ToUpper(witcher.Game.ID), ""))
-		if detail.Game.ID != witcher.Game.ID || len(detail.Children) != 1 || len(detail.Children[0].Games) != 2 {
-			t.Fatalf("detail = %+v", detail)
-		}
-		assertError(t, serve(handler, http.MethodGet, "/games/not-a-uuid", ""), http.StatusBadRequest, "invalid_request")
-		assertError(t, serve(handler, http.MethodGet, "/games/00000000-0000-4000-8000-000000000000", ""), http.StatusNotFound, "not_found")
-	})
-	t.Run("batch reports missing and inactive IDs explicitly", func(t *testing.T) {
-		inactive := witcher.MatchedChildren[1].ID
-		if _, err := db.ExecContext(t.Context(), `UPDATE catalog.games SET is_active = false WHERE id = $1`, inactive); err != nil {
-			t.Fatal(err)
-		}
-		missing := "00000000-0000-4000-8000-000000000001"
-		body := `{"gameIds":["` + witcher.Game.ID + `","` + missing + `","` + inactive + `","` + witcher.MatchedChildren[0].ID + `"]}`
-		batch := decode[batchResponseDTO](t, serve(handler, http.MethodPost, "/games/batch", body))
-		if len(batch.Items) != 2 || !slices.Equal(batch.MissingGameIDs, []string{missing}) || !slices.Equal(batch.InactiveGameIDs, []string{inactive}) {
-			t.Fatalf("batch = %+v", batch)
-		}
-		if batch.Items[1].Parent == nil || batch.Items[1].Parent.ID != witcher.Game.ID {
-			t.Fatalf("child lacks its parent reference: %+v", batch.Items[1])
-		}
-		assertError(t, serve(handler, http.MethodPost, "/games/batch", `{"gameIds":["`+missing+`","`+missing+`"]}`), http.StatusBadRequest, "invalid_request")
-		assertError(t, serve(handler, http.MethodPost, "/games/batch", `{"gameIds":[]}`), http.StatusBadRequest, "invalid_request")
-	})
-	t.Run("provider outage keeps stored games readable", func(t *testing.T) {
-		if _, err := db.ExecContext(t.Context(), `UPDATE catalog.search_queries SET refreshed_at = now() - interval '2 hours'`); err != nil {
-			t.Fatal(err)
-		}
-		provider.fail(errors.New("igdb unavailable"))
-		before := provider.searchCount()
-		page := decode[gamePageDTO](t, serve(handler, http.MethodGet, "/games?query=witcher+3", ""))
-		if len(page.Items) != 1 || provider.searchCount() != before+1 {
-			t.Fatalf("stale search during outage = %+v", page)
-		}
-		assertError(t, serve(handler, http.MethodGet, "/games?query=elden+ring", ""), http.StatusServiceUnavailable, "unavailable")
-		decode[gameDetailDTO](t, serve(handler, http.MethodGet, "/games/"+witcher.Game.ID, ""))
-		decode[batchResponseDTO](t, serve(handler, http.MethodPost, "/games/batch", `{"gameIds":["`+witcher.Game.ID+`"]}`))
-	})
-	t.Run("every catalog route requires the service token", func(t *testing.T) {
-		for _, route := range []struct{ method, target string }{
-			{http.MethodGet, "/games?query=witcher"},
-			{http.MethodGet, "/games/" + witcher.Game.ID},
-			{http.MethodPost, "/games/batch"},
-		} {
-			req := httptest.NewRequest(route.method, route.target, strings.NewReader(`{"gameIds":["`+witcher.Game.ID+`"]}`))
-			req.Header.Set("X-Request-ID", "auth_rejected-123")
-			req.Header.Set("Content-Type", "application/json")
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, req)
-			assertUnauthorizedResponse(t, response)
-		}
-	})
+	}
+	assertEqual(t, "paged titles", fmt.Sprint(seen), fmt.Sprint([]string{"The Witcher", "The Witcher 2: Assassins of Kings", "The Witcher 3: Wild Hunt"}))
+	assertError(t, f.get("/games?query=zelda&limit=2&cursor=bm90LWEtY3Vyc29y"), http.StatusBadRequest, "invalid_request")
+}
+
+func (f *routeFixture) testDetail(t *testing.T) {
+	detail := decode[gameDetailDTO](t, f.get("/games/"+strings.ToUpper(f.witcher.Game.ID)))
+	assertEqual(t, "id", detail.Game.ID, f.witcher.Game.ID)
+	assertEqual(t, "child groups", len(detail.Children), 1)
+	assertEqual(t, "children", len(detail.Children[0].Games), 2)
+	assertError(t, f.get("/games/not-a-uuid"), http.StatusBadRequest, "invalid_request")
+	assertError(t, f.get("/games/00000000-0000-4000-8000-000000000000"), http.StatusNotFound, "not_found")
+}
+
+func (f *routeFixture) testBatch(t *testing.T) {
+	inactive, child := f.witcher.MatchedChildren[1].ID, f.witcher.MatchedChildren[0].ID
+	f.exec(t, `UPDATE catalog.games SET is_active = false WHERE id = $1`, inactive)
+	missing := "00000000-0000-4000-8000-000000000001"
+	batch := decode[batchResponseDTO](t, f.batch(t, f.witcher.Game.ID, missing, inactive, child))
+	assertEqual(t, "items", len(batch.Items), 2)
+	assertEqual(t, "missing", fmt.Sprint(batch.MissingGameIDs), fmt.Sprint([]string{missing}))
+	assertEqual(t, "inactive", fmt.Sprint(batch.InactiveGameIDs), fmt.Sprint([]string{inactive}))
+	assertEqual(t, "child parent", fmt.Sprint(batch.Items[1].Parent), fmt.Sprint(&parentDTO{ID: f.witcher.Game.ID, Title: f.witcher.Game.Title}))
+	assertError(t, f.batch(t, missing, missing), http.StatusBadRequest, "invalid_request")
+	assertError(t, f.batch(t), http.StatusBadRequest, "invalid_request")
+}
+
+func (f *routeFixture) testProviderOutage(t *testing.T) {
+	f.exec(t, `UPDATE catalog.search_queries SET refreshed_at = now() - interval '2 hours'`)
+	f.provider.fail(errors.New("igdb unavailable"))
+	before := f.provider.searchCount()
+	page := decode[gamePageDTO](t, f.get("/games?query=witcher+3"))
+	assertEqual(t, "stale hits", len(page.Items), 1)
+	assertEqual(t, "provider searches", f.provider.searchCount(), before+1)
+	assertError(t, f.get("/games?query=elden+ring"), http.StatusServiceUnavailable, "unavailable")
+	decode[gameDetailDTO](t, f.get("/games/"+f.witcher.Game.ID))
+	decode[batchResponseDTO](t, f.batch(t, f.witcher.Game.ID))
+}
+
+func (f *routeFixture) testAuthentication(t *testing.T) {
+	for _, route := range []struct{ method, target string }{
+		{http.MethodGet, "/games?query=witcher"},
+		{http.MethodGet, "/games/" + f.witcher.Game.ID},
+		{http.MethodPost, "/games/batch"},
+	} {
+		req := httptest.NewRequest(route.method, route.target, strings.NewReader(`{"gameIds":["`+f.witcher.Game.ID+`"]}`))
+		req.Header.Set("X-Request-ID", "auth_rejected-123")
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		f.handler.ServeHTTP(response, req)
+		assertUnauthorizedResponse(t, response)
+	}
 }

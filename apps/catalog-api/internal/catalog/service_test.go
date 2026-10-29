@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -78,69 +79,97 @@ func TestSearchRequestsAreValidatedBeforeAnyLookup(t *testing.T) {
 	}
 }
 
+func assertTitles(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	if !slices.Equal(got, want) {
+		t.Fatalf("titles = %v, want %v", got, want)
+	}
+}
+
+func assertProviderSearches(t *testing.T, source *fakeSource, want int) {
+	t.Helper()
+	if got := providerSearches(source); got != want {
+		t.Fatalf("provider searches = %d, want %d", got, want)
+	}
+}
+
+func assertErrorIs(t *testing.T, err, target error) {
+	t.Helper()
+	if !errors.Is(err, target) {
+		t.Fatalf("err = %v, want %v", err, target)
+	}
+}
+
+func execSQL(t *testing.T, db *sql.DB, query string, args ...any) {
+	t.Helper()
+	if _, err := db.ExecContext(t.Context(), query, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSearchRefreshesOnlyStaleSearchesFromTheProvider(t *testing.T) {
 	store, _ := newTestStore(t)
 	source := &fakeSource{games: []SourceGame{witcher, bloodAndWine}, known: searchable}
 	service := newTestService(store, source, testPolicy)
 
 	page := searchPage(t, service, SearchRequest{Query: "Witcher 3"})
-	if len(page.Hits) != 1 || page.Hits[0].Game.Title != witcher.Title || page.NextCursor != "" {
-		t.Fatalf("hits = %v", hitTitles(page.Hits))
-	}
-	if want := []string{bloodAndWine.Title, complete.Title, anniversary.Title, nextGen.Title, goty.Title, heartsOfStone.Title}; !slices.Equal(titles(page.Hits[0].MatchedChildren), want) {
-		t.Fatalf("matched children = %v, want stored relatives matching every word %v", titles(page.Hits[0].MatchedChildren), want)
-	}
+	assertTitles(t, hitTitles(page.Hits), witcher.Title)
+	// Every stored relative whose title contains every query word matches.
+	assertTitles(t, titles(page.Hits[0].MatchedChildren), bloodAndWine.Title, complete.Title, anniversary.Title, nextGen.Title, goty.Title, heartsOfStone.Title)
 	if want := []KindCount{{KindEdition, 3}, {KindExpansion, 2}, {KindUpdate, 1}}; !slices.Equal(page.Hits[0].ChildCounts, want) {
 		t.Fatalf("child counts = %v", page.Hits[0].ChildCounts)
 	}
-	if providerSearches(source) != 1 || source.query != "Witcher 3" || source.limit != maxSearchLimit {
-		t.Fatalf("provider searches = %d, query %q, limit %d", providerSearches(source), source.query, source.limit)
+	if page.NextCursor != "" || source.query != "Witcher 3" || source.limit != maxSearchLimit {
+		t.Fatalf("cursor %q, provider query %q, limit %d", page.NextCursor, source.query, source.limit)
 	}
+	assertProviderSearches(t, source, 1)
 
 	t.Run("fresh searches are answered locally regardless of case and spacing", func(t *testing.T) {
 		for _, query := range []string{"Witcher 3", "  witcher   3 ", "WITCHER 3"} {
-			if page := searchPage(t, service, SearchRequest{Query: query}); len(page.Hits) != 1 {
-				t.Fatalf("%q hits = %v", query, hitTitles(page.Hits))
-			}
+			assertTitles(t, hitTitles(searchPage(t, service, SearchRequest{Query: query}).Hits), witcher.Title)
 		}
-		if providerSearches(source) != 1 {
-			t.Fatalf("fresh searches reached the provider %d times", providerSearches(source))
-		}
+		assertProviderSearches(t, source, 1)
 	})
 	t.Run("kind filters are separate searches", func(t *testing.T) {
 		page := searchPage(t, service, SearchRequest{Query: "witcher 3", Categories: []Category{CategoryExpansion}})
-		if providerSearches(source) != 2 || source.filter.Kinds[0] != KindExpansion {
-			t.Fatalf("filtered search was not refreshed: %v", source.filter)
-		}
-		if !slices.Equal(hitTitles(page.Hits), []string{bloodAndWine.Title, heartsOfStone.Title}) {
-			t.Fatalf("expansion hits = %v", hitTitles(page.Hits))
-		}
+		assertProviderSearches(t, source, 2)
+		assertTitles(t, hitTitles(page.Hits), bloodAndWine.Title, heartsOfStone.Title)
 		assertChildHits(t, page.Hits, KindExpansion, witcher.Title)
 	})
 	t.Run("stale searches are refreshed", func(t *testing.T) {
 		expireSearches(t, service)
 		searchPage(t, service, SearchRequest{Query: "witcher 3"})
-		if providerSearches(source) != 3 {
-			t.Fatalf("stale search was not refreshed")
-		}
+		assertProviderSearches(t, source, 3)
 	})
 	t.Run("follow-up pages never contact the provider", func(t *testing.T) {
-		filtered := SearchRequest{Query: "witcher 3", Categories: []Category{CategoryExpansion}, Limit: 1}
-		first := searchPage(t, service, filtered)
-		expireSearches(t, service)
-		before := providerSearches(source)
-		filtered.Cursor = first.NextCursor
-		second := searchPage(t, service, filtered)
-		if providerSearches(source) != before || len(second.Hits) != 1 || second.Hits[0].Game.ID == first.Hits[0].Game.ID {
-			t.Fatalf("second page %v after %v, provider searches %d -> %d", hitTitles(second.Hits), hitTitles(first.Hits), before, providerSearches(source))
-		}
+		testFollowUpPagesStayLocal(t, service, source)
 	})
 }
 
-func TestSearchRanksFiltersAndPaginatesStoredGames(t *testing.T) {
+func testFollowUpPagesStayLocal(t *testing.T, service *Service, source *fakeSource) {
+	filtered := SearchRequest{Query: "witcher 3", Categories: []Category{CategoryExpansion}, Limit: 1}
+	first := searchPage(t, service, filtered)
+	expireSearches(t, service)
+	before := providerSearches(source)
+	filtered.Cursor = first.NextCursor
+	second := searchPage(t, service, filtered)
+	assertProviderSearches(t, source, before)
+	assertTitles(t, hitTitles(second.Hits), heartsOfStone.Title)
+	assertTitles(t, hitTitles(first.Hits), bloodAndWine.Title)
+}
+
+// rankFixture holds stored games for the local search tests, keyed by title.
+type rankFixture struct {
+	store   *Store
+	db      *sql.DB
+	service *Service
+	stored  map[string]Game
+}
+
+func newRankFixture(t *testing.T) rankFixture {
 	store, db := newTestStore(t)
 	switchPlatform := SourcePlatform{ExternalID: "130", Name: "Nintendo Switch"}
-	stored := map[string]Game{}
+	fixture := rankFixture{store: store, db: db, service: newTestService(store, nil, testPolicy), stored: map[string]Game{}}
 	for _, game := range []SourceGame{
 		{Source: "igdb", ExternalID: "1", Title: "The Legend of Zelda", Kind: KindGame},
 		{Source: "igdb", ExternalID: "2", Title: "Zelda II: The Adventure of Link", Kind: KindGame},
@@ -150,96 +179,94 @@ func TestSearchRanksFiltersAndPaginatesStoredGames(t *testing.T) {
 		{Source: "igdb", ExternalID: "6", Title: "Link's Awakening", Kind: KindGame},
 		{Source: "igdb", ExternalID: "7", Title: "100% Orange_Juice", Kind: KindGame},
 	} {
-		stored[game.Title] = upsertOne(t, store, game)
+		fixture.stored[game.Title] = upsertOne(t, store, game)
 	}
-	service := newTestService(store, nil, testPolicy)
+	return fixture
+}
 
-	t.Run("hits rank by their best match: exact, prefix, then word", func(t *testing.T) {
-		page := searchPage(t, service, SearchRequest{Query: "zelda"})
-		// The Legend of Zelda ranks as a prefix match through its child Zelda Classic.
-		want := []string{"Zelda", "The Legend of Zelda", "Zelda II: The Adventure of Link", "The Legend of Zelda: Breath of the Wild"}
-		if !slices.Equal(hitTitles(page.Hits), want) || page.NextCursor != "" {
-			t.Fatalf("hits = %v, want %v", hitTitles(page.Hits), want)
-		}
-		if !slices.Equal(titles(page.Hits[1].MatchedChildren), []string{"Zelda Classic"}) {
-			t.Fatalf("matched children = %v", titles(page.Hits[1].MatchedChildren))
-		}
-	})
-	t.Run("pages follow the same order without gaps or duplicates", func(t *testing.T) {
-		var collected []string
-		request := SearchRequest{Query: "zelda", Limit: 1}
-		for range 10 {
-			page := searchPage(t, service, request)
-			collected = append(collected, hitTitles(page.Hits)...)
-			if page.NextCursor == "" {
-				break
-			}
-			if len(page.NextCursor) > maxCursorLength {
-				t.Fatalf("cursor exceeds %d bytes", maxCursorLength)
-			}
-			request.Cursor = page.NextCursor
-		}
-		if want := hitTitles(searchPage(t, service, SearchRequest{Query: "zelda"}).Hits); !slices.Equal(collected, want) {
-			t.Fatalf("paged = %v, want %v", collected, want)
-		}
-	})
-	t.Run("cursors only continue the search they were issued for", func(t *testing.T) {
-		cursor := searchPage(t, service, SearchRequest{Query: "zelda", Limit: 1}).NextCursor
-		for _, request := range []SearchRequest{
-			{Query: "link", Limit: 1, Cursor: cursor},
-			{Query: "zelda", Limit: 1, Cursor: cursor, Categories: []Category{CategoryGame}},
-			{Query: "zelda", Limit: 1, Cursor: cursor, PlatformID: stored["Zelda"].Platforms[0].ID},
-		} {
-			if _, err := service.Search(t.Context(), request); !errors.Is(err, ErrInvalidRequest) {
-				t.Fatalf("foreign cursor err = %v", err)
-			}
-		}
-		if page := searchPage(t, service, SearchRequest{Query: " ZELDA ", Limit: 1, Cursor: cursor}); len(page.Hits) != 1 {
-			t.Fatal("equivalent search rejected its cursor")
-		}
-	})
-	t.Run("platform and kind filters", func(t *testing.T) {
-		page := searchPage(t, service, SearchRequest{Query: "zelda", PlatformID: strings.ToUpper(stored["Zelda"].Platforms[0].ID)})
-		if want := []string{"Zelda", "The Legend of Zelda: Breath of the Wild"}; !slices.Equal(hitTitles(page.Hits), want) {
-			t.Fatalf("platform hits = %v", hitTitles(page.Hits))
-		}
-		page = searchPage(t, service, SearchRequest{Query: "zelda", Categories: []Category{CategoryMod}})
-		if len(page.Hits) != 1 || page.Hits[0].Game.Parent == nil || page.Hits[0].Game.Parent.Title != "The Legend of Zelda" || len(page.Hits[0].MatchedChildren) != 0 {
-			t.Fatalf("mod hits = %+v", page.Hits)
-		}
-		page = searchPage(t, service, SearchRequest{Query: "zelda", Categories: []Category{CategoryGame}})
-		if slices.Contains(hitTitles(page.Hits), "Zelda Classic") || len(page.Hits) != 4 {
-			t.Fatalf("parent hits = %v", hitTitles(page.Hits))
-		}
-	})
+func (f rankFixture) titles(t *testing.T, request SearchRequest) []string {
+	t.Helper()
+	return hitTitles(searchPage(t, f.service, request).Hits)
+}
+
+func TestSearchRanksFiltersAndPaginatesStoredGames(t *testing.T) {
+	fixture := newRankFixture(t)
+	t.Run("hits rank by their best match: exact, prefix, then word", fixture.testRanking)
+	t.Run("pages follow the same order without gaps or duplicates", fixture.testPagination)
+	t.Run("cursors only continue the search they were issued for", fixture.testCursorBinding)
+	t.Run("platform and kind filters", fixture.testFilters)
 	t.Run("wildcards in queries match literally", func(t *testing.T) {
-		if page := searchPage(t, service, SearchRequest{Query: "0% orange_"}); !slices.Equal(hitTitles(page.Hits), []string{"100% Orange_Juice"}) {
-			t.Fatalf("hits = %v", hitTitles(page.Hits))
-		}
-		if page := searchPage(t, service, SearchRequest{Query: "%_"}); len(page.Hits) != 0 {
-			t.Fatalf("wildcards matched %v", hitTitles(page.Hits))
-		}
+		assertTitles(t, fixture.titles(t, SearchRequest{Query: "0% orange_"}), "100% Orange_Juice")
+		assertTitles(t, fixture.titles(t, SearchRequest{Query: "%_"}))
 	})
-	t.Run("provider matches without the query in their title are found", func(t *testing.T) {
-		query, err := newLocalQuery(SearchRequest{Query: "botw", Limit: 20})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := store.recordSearch(t.Context(), query.key, []string{stored["The Legend of Zelda: Breath of the Wild"].ID}); err != nil {
-			t.Fatal(err)
-		}
-		if page := searchPage(t, service, SearchRequest{Query: "BotW"}); !slices.Equal(hitTitles(page.Hits), []string{"The Legend of Zelda: Breath of the Wild"}) {
-			t.Fatalf("hits = %v", hitTitles(page.Hits))
-		}
-	})
+	t.Run("provider matches without the query in their title are found", fixture.testProviderMatches)
 	t.Run("inactive games are not found", func(t *testing.T) {
-		if _, err := db.ExecContext(t.Context(), `UPDATE catalog.games SET is_active = false WHERE id = $1`, stored["Zelda"].ID); err != nil {
-			t.Fatal(err)
-		}
-		if page := searchPage(t, service, SearchRequest{Query: "zelda"}); slices.Contains(hitTitles(page.Hits), "Zelda") {
-			t.Fatalf("hits = %v", hitTitles(page.Hits))
+		execSQL(t, fixture.db, `UPDATE catalog.games SET is_active = false WHERE id = $1`, fixture.stored["Zelda"].ID)
+		if slices.Contains(fixture.titles(t, SearchRequest{Query: "zelda"}), "Zelda") {
+			t.Fatal("inactive game was found")
 		}
 	})
+}
+
+func (f rankFixture) testRanking(t *testing.T) {
+	page := searchPage(t, f.service, SearchRequest{Query: "zelda"})
+	// The Legend of Zelda ranks as a prefix match through its child Zelda Classic.
+	assertTitles(t, hitTitles(page.Hits), "Zelda", "The Legend of Zelda", "Zelda II: The Adventure of Link", "The Legend of Zelda: Breath of the Wild")
+	assertTitles(t, titles(page.Hits[1].MatchedChildren), "Zelda Classic")
+	if page.NextCursor != "" {
+		t.Fatal("single page has a next cursor")
+	}
+}
+
+func (f rankFixture) testPagination(t *testing.T) {
+	var collected []string
+	request := SearchRequest{Query: "zelda", Limit: 1}
+	for range 10 {
+		page := searchPage(t, f.service, request)
+		collected = append(collected, hitTitles(page.Hits)...)
+		if len(page.NextCursor) > maxCursorLength {
+			t.Fatalf("cursor exceeds %d bytes", maxCursorLength)
+		}
+		if request.Cursor = page.NextCursor; request.Cursor == "" {
+			break
+		}
+	}
+	assertTitles(t, collected, f.titles(t, SearchRequest{Query: "zelda"})...)
+}
+
+func (f rankFixture) testCursorBinding(t *testing.T) {
+	cursor := searchPage(t, f.service, SearchRequest{Query: "zelda", Limit: 1}).NextCursor
+	for _, request := range []SearchRequest{
+		{Query: "link", Limit: 1, Cursor: cursor},
+		{Query: "zelda", Limit: 1, Cursor: cursor, Categories: []Category{CategoryGame}},
+		{Query: "zelda", Limit: 1, Cursor: cursor, PlatformID: f.stored["Zelda"].Platforms[0].ID},
+	} {
+		_, err := f.service.Search(t.Context(), request)
+		assertErrorIs(t, err, ErrInvalidRequest)
+	}
+	assertTitles(t, f.titles(t, SearchRequest{Query: " ZELDA ", Limit: 1, Cursor: cursor}), "The Legend of Zelda")
+}
+
+func (f rankFixture) testFilters(t *testing.T) {
+	platform := strings.ToUpper(f.stored["Zelda"].Platforms[0].ID)
+	assertTitles(t, f.titles(t, SearchRequest{Query: "zelda", PlatformID: platform}), "Zelda", "The Legend of Zelda: Breath of the Wild")
+	mods := searchPage(t, f.service, SearchRequest{Query: "zelda", Categories: []Category{CategoryMod}}).Hits
+	assertTitles(t, hitTitles(mods), "Zelda Classic")
+	assertChildHits(t, mods, KindMod, "The Legend of Zelda")
+	// Filtered hits are not bundled, so The Legend of Zelda keeps its own rank.
+	assertTitles(t, f.titles(t, SearchRequest{Query: "zelda", Categories: []Category{CategoryGame}}),
+		"Zelda", "Zelda II: The Adventure of Link", "The Legend of Zelda", "The Legend of Zelda: Breath of the Wild")
+}
+
+func (f rankFixture) testProviderMatches(t *testing.T) {
+	query, err := newLocalQuery(SearchRequest{Query: "botw", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.recordSearch(t.Context(), query.key, []string{f.stored["The Legend of Zelda: Breath of the Wild"].ID}); err != nil {
+		t.Fatal(err)
+	}
+	assertTitles(t, f.titles(t, SearchRequest{Query: "BotW"}), "The Legend of Zelda: Breath of the Wild")
 }
 
 func TestSearchFallsBackToStoredGamesWhileTheProviderFails(t *testing.T) {
@@ -253,9 +280,9 @@ func TestSearchFallsBackToStoredGamesWhileTheProviderFails(t *testing.T) {
 	source.err = errors.New("igdb unavailable")
 
 	page := searchPage(t, service, SearchRequest{Query: "witcher 3"})
-	if len(page.Hits) != 1 || page.Hits[0].Game.Title != witcher.Title || providerSearches(source) != 2 {
-		t.Fatalf("stale hits = %v after %d provider searches", hitTitles(page.Hits), providerSearches(source))
-	}
+	assertTitles(t, hitTitles(page.Hits), witcher.Title)
+	assertProviderSearches(t, source, 2)
+	unstored := SearchRequest{Query: "elden ring", Limit: 20}
 	for _, step := range []struct {
 		name     string
 		advance  time.Duration
@@ -266,34 +293,34 @@ func TestSearchFallsBackToStoredGamesWhileTheProviderFails(t *testing.T) {
 	} {
 		t.Run(step.name, func(t *testing.T) {
 			now = now.Add(step.advance)
-			if _, err := service.Search(t.Context(), SearchRequest{Query: "elden ring", Limit: 20}); !errors.Is(err, ErrUnavailable) {
-				t.Fatalf("search without stored matches err = %v, want unavailable", err)
-			}
-			if providerSearches(source) != step.searches {
-				t.Fatalf("provider searches = %d, want %d", providerSearches(source), step.searches)
-			}
+			_, err := service.Search(t.Context(), unstored)
+			assertErrorIs(t, err, ErrUnavailable)
+			assertProviderSearches(t, source, step.searches)
 		})
 	}
 	t.Run("details and batches stay readable", func(t *testing.T) {
-		calls := source.calls
-		if _, err := service.Detail(t.Context(), page.Hits[0].Game.ID); err != nil {
-			t.Fatal(err)
-		}
-		if batch, err := service.Batch(t.Context(), []string{page.Hits[0].Game.ID}); err != nil || len(batch.Games) != 1 {
-			t.Fatalf("batch = %+v, %v", batch, err)
-		}
-		if source.calls != calls {
-			t.Fatal("details or batches contacted the provider")
-		}
+		testReadsWithoutProvider(t, service, source, page.Hits[0].Game.ID)
 	})
 	t.Run("recovered provider refreshes again", func(t *testing.T) {
 		source.err = nil
 		now = now.Add(testPolicy.Cooldown + time.Second)
-		searchPage(t, service, SearchRequest{Query: "elden ring"})
-		if providerSearches(source) != 4 {
-			t.Fatalf("provider searches = %d, want 4", providerSearches(source))
-		}
+		searchPage(t, service, unstored)
+		assertProviderSearches(t, source, 4)
 	})
+}
+
+func testReadsWithoutProvider(t *testing.T, service *Service, source *fakeSource, id string) {
+	calls := source.calls
+	if _, err := service.Detail(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := service.Batch(t.Context(), []string{id})
+	if err != nil || len(batch.Games) != 1 {
+		t.Fatalf("batch = %+v, %v", batch, err)
+	}
+	if source.calls != calls {
+		t.Fatal("details or batches contacted the provider")
+	}
 }
 
 // blockingSource holds provider searches until released.
@@ -322,15 +349,14 @@ func TestSlowRefreshesFinishInTheBackgroundAndAreShared(t *testing.T) {
 	t.Cleanup(service.Wait)
 
 	for range 2 {
-		if _, err := service.Search(t.Context(), SearchRequest{Query: "witcher 3", Limit: 20}); !errors.Is(err, ErrUnavailable) {
-			t.Fatalf("pending refresh without stored games err = %v, want unavailable", err)
-		}
+		_, err := service.Search(t.Context(), SearchRequest{Query: "witcher 3", Limit: 20})
+		assertErrorIs(t, err, ErrUnavailable)
 	}
 	close(source.release)
 	service.Wait()
-	page := searchPage(t, service, SearchRequest{Query: "witcher 3"})
-	if len(page.Hits) != 1 || source.searches.Load() != 1 {
-		t.Fatalf("hits = %v after %d provider searches, want one shared refresh", hitTitles(page.Hits), source.searches.Load())
+	assertTitles(t, hitTitles(searchPage(t, service, SearchRequest{Query: "witcher 3"}).Hits), witcher.Title)
+	if source.searches.Load() != 1 {
+		t.Fatalf("provider searches = %d, want one shared refresh", source.searches.Load())
 	}
 }
 
@@ -340,9 +366,7 @@ func TestBatchClassifiesEveryRequestedIDOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(t.Context(), `UPDATE catalog.games SET is_active = false WHERE id = $1`, games[2].ID); err != nil {
-		t.Fatal(err)
-	}
+	execSQL(t, db, `UPDATE catalog.games SET is_active = false WHERE id = $1`, games[2].ID)
 	service := newTestService(store, nil, testPolicy)
 	missing := "00000000-0000-4000-8000-000000000000"
 
@@ -350,13 +374,10 @@ func TestBatchClassifiesEveryRequestedIDOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(titles(batch.Games), []string{bloodAndWine.Title, witcher.Title}) || batch.Games[0].ID != games[1].ID ||
-		batch.Games[0].Parent == nil || batch.Games[0].Parent.ID != games[0].ID {
-		t.Fatalf("games = %+v", batch.Games)
-	}
-	if !slices.Equal(batch.Missing, []string{missing}) || !slices.Equal(batch.Inactive, []string{games[2].ID}) {
-		t.Fatalf("missing %v inactive %v", batch.Missing, batch.Inactive)
-	}
+	assertTitles(t, titles(batch.Games), bloodAndWine.Title, witcher.Title)
+	assertTitles(t, []string{batch.Games[0].ID, batch.Games[0].Parent.ID}, games[1].ID, games[0].ID)
+	assertTitles(t, batch.Missing, missing)
+	assertTitles(t, batch.Inactive, games[2].ID)
 
 	t.Run("maximum batch size", func(t *testing.T) {
 		ids := make([]string, maxBatchSize)
@@ -379,9 +400,8 @@ func TestBatchClassifiesEveryRequestedIDOnce(t *testing.T) {
 		{"not a UUID", []string{"7346"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := service.Batch(t.Context(), tc.ids); !errors.Is(err, ErrInvalidRequest) {
-				t.Fatalf("err = %v, want invalid request", err)
-			}
+			_, err := service.Batch(t.Context(), tc.ids)
+			assertErrorIs(t, err, ErrInvalidRequest)
 		})
 	}
 	t.Run("details of inactive games stay readable", func(t *testing.T) {
@@ -389,9 +409,8 @@ func TestBatchClassifiesEveryRequestedIDOnce(t *testing.T) {
 		if err != nil || detail.Game.IsActive || detail.Game.ID != games[2].ID {
 			t.Fatalf("detail = %+v, %v", detail, err)
 		}
-		if _, err := service.Detail(t.Context(), missing); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("missing detail err = %v", err)
-		}
+		_, err = service.Detail(t.Context(), missing)
+		assertErrorIs(t, err, ErrNotFound)
 	})
 }
 

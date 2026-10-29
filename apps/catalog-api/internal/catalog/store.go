@@ -102,20 +102,28 @@ func normalize(games []SourceGame) ([]SourceGame, error) {
 			continue
 		}
 		seen[key] = true
-		platforms := make([]SourcePlatform, 0, len(game.Platforms))
-		seenPlatforms := map[string]bool{}
-		for _, platform := range game.Platforms {
-			platform.Name = strings.TrimSpace(platform.Name)
-			if platform.ExternalID == "" || platform.Name == "" {
-				return nil, fmt.Errorf("%w: source platforms require external ID and name", ErrInvalidRequest)
-			}
-			if !seenPlatforms[platform.ExternalID] {
-				seenPlatforms[platform.ExternalID] = true
-				platforms = append(platforms, platform)
-			}
+		platforms, err := normalizePlatforms(game.Platforms)
+		if err != nil {
+			return nil, err
 		}
 		game.Platforms = platforms
 		result = append(result, game)
+	}
+	return result, nil
+}
+
+func normalizePlatforms(platforms []SourcePlatform) ([]SourcePlatform, error) {
+	result := make([]SourcePlatform, 0, len(platforms))
+	seen := map[string]bool{}
+	for _, platform := range platforms {
+		platform.Name = strings.TrimSpace(platform.Name)
+		if platform.ExternalID == "" || platform.Name == "" {
+			return nil, fmt.Errorf("%w: source platforms require external ID and name", ErrInvalidRequest)
+		}
+		if !seen[platform.ExternalID] {
+			seen[platform.ExternalID] = true
+			result = append(result, platform)
+		}
 	}
 	return result, nil
 }

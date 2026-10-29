@@ -27,21 +27,6 @@ func TestLiveIGDBBundling(t *testing.T) {
 	}
 	store, _ := catalog.NewTestStore(t)
 	importer := catalog.NewImporter(client, store)
-	search := func(t *testing.T, query string, categories ...catalog.Category) []catalog.SearchHit {
-		t.Helper()
-		hits, err := importer.Search(t.Context(), query, categories, 50)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, hit := range hits {
-			parent := ""
-			if hit.Game.Parent != nil {
-				parent = " · " + string(hit.Game.Kind) + " of " + hit.Game.Parent.Title
-			}
-			t.Logf("%s [%s]%s counts=%v matched=%d", hit.Game.Title, hit.Game.Kind, parent, hit.ChildCounts, len(hit.MatchedChildren))
-		}
-		return hits
-	}
 	for _, tc := range []struct {
 		query, title string
 		kinds        []catalog.Kind
@@ -51,21 +36,13 @@ func TestLiveIGDBBundling(t *testing.T) {
 		{"elden ring", "Elden Ring", []catalog.Kind{catalog.KindEdition, catalog.KindExpansion}},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
-			hits := search(t, tc.query)
+			hits := liveSearch(t, importer, tc.query)
 			assertBundled(t, hits)
-			main := hitsTitled(hits, tc.title)
-			if len(main) != 1 {
-				t.Fatalf("%q yields %d hits for %q, want exactly one", tc.query, len(main), tc.title)
-			}
-			for _, kind := range tc.kinds {
-				if !slices.ContainsFunc(main[0].ChildCounts, func(count catalog.KindCount) bool { return count.Kind == kind }) {
-					t.Errorf("%s has no %s children: %v", tc.title, kind, main[0].ChildCounts)
-				}
-			}
+			assertMainHit(t, hits, tc.title, tc.kinds)
 		})
 	}
 	t.Run("resident evil 2", func(t *testing.T) {
-		hits := search(t, "resident evil 2")
+		hits := liveSearch(t, importer, "resident evil 2")
 		assertBundled(t, hits)
 		if !slices.ContainsFunc(hitsTitled(hits, "Resident Evil 2"), func(hit catalog.SearchHit) bool {
 			return slices.ContainsFunc(hit.MatchedChildren, func(child catalog.Game) bool { return child.Kind == catalog.KindRemake })
@@ -81,16 +58,51 @@ func TestLiveIGDBBundling(t *testing.T) {
 		{catalog.CategoryDLC, []catalog.Kind{catalog.KindDLC, catalog.KindPack, catalog.KindUpdate}},
 	} {
 		t.Run("witcher 3 "+string(tc.category), func(t *testing.T) {
-			hits := search(t, "witcher 3", tc.category)
-			if len(hits) == 0 {
-				t.Fatal("no hits")
-			}
-			for _, hit := range hits {
-				if !slices.Contains(tc.kinds, hit.Game.Kind) || hit.Game.Parent == nil || len(hit.MatchedChildren) != 0 {
-					t.Errorf("unexpected %s hit: %+v", tc.category, hit.Game)
-				}
-			}
+			assertFlatChildren(t, liveSearch(t, importer, "witcher 3", tc.category), tc.kinds)
 		})
+	}
+}
+
+func liveSearch(t *testing.T, importer *catalog.Importer, query string, categories ...catalog.Category) []catalog.SearchHit {
+	t.Helper()
+	hits, err := importer.Search(t.Context(), query, categories, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hit := range hits {
+		parent := ""
+		if hit.Game.Parent != nil {
+			parent = " · " + string(hit.Game.Kind) + " of " + hit.Game.Parent.Title
+		}
+		t.Logf("%s [%s]%s counts=%v matched=%d", hit.Game.Title, hit.Game.Kind, parent, hit.ChildCounts, len(hit.MatchedChildren))
+	}
+	return hits
+}
+
+// assertMainHit checks that title is exactly one hit with children of kinds.
+func assertMainHit(t *testing.T, hits []catalog.SearchHit, title string, kinds []catalog.Kind) {
+	t.Helper()
+	main := hitsTitled(hits, title)
+	if len(main) != 1 {
+		t.Fatalf("%d hits for %q, want exactly one", len(main), title)
+	}
+	for _, kind := range kinds {
+		if !slices.ContainsFunc(main[0].ChildCounts, func(count catalog.KindCount) bool { return count.Kind == kind }) {
+			t.Errorf("%s has no %s children: %v", title, kind, main[0].ChildCounts)
+		}
+	}
+}
+
+// assertFlatChildren checks that a filtered search yields only children of kinds.
+func assertFlatChildren(t *testing.T, hits []catalog.SearchHit, kinds []catalog.Kind) {
+	t.Helper()
+	if len(hits) == 0 {
+		t.Fatal("no hits")
+	}
+	for _, hit := range hits {
+		if !slices.Contains(kinds, hit.Game.Kind) || hit.Game.Parent == nil || len(hit.MatchedChildren) != 0 {
+			t.Errorf("unexpected hit: %+v", hit.Game)
+		}
 	}
 }
 

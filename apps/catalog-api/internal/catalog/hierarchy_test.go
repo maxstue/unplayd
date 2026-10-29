@@ -122,11 +122,7 @@ func TestUpsertReparentsWithoutChangingIdentity(t *testing.T) {
 
 	t.Run("unchanged relations keep timestamps", func(t *testing.T) {
 		again := byTitle(must(store.Upsert(t.Context(), []SourceGame{bloodAndWine, complete, witcher})))
-		for title, game := range first {
-			if again[title].ID != game.ID || !again[title].UpdatedAt.Equal(game.UpdatedAt) {
-				t.Fatalf("%s changed identity or timestamp", title)
-			}
-		}
+		assertUnchanged(t, first, again)
 	})
 	t.Run("detached child becomes a parent", func(t *testing.T) {
 		games := must(store.Upsert(t.Context(), []SourceGame{withParent(complete, "")}))
@@ -151,16 +147,7 @@ func TestUpsertReparentsWithoutChangingIdentity(t *testing.T) {
 		if games[witcher.Title].ID != first[witcher.Title].ID {
 			t.Fatal("re-parenting changed the parent's UUID")
 		}
-		detail, err := store.Detail(t.Context(), top.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var titles []string
-		for _, group := range detail.Children {
-			for _, child := range group.Games {
-				titles = append(titles, child.Title)
-			}
-		}
+		titles := slices.Concat(groupedTitles(t, must(store.Detail(t.Context(), top.ID)), &top)...)
 		if !slices.Contains(titles, bloodAndWine.Title) || !slices.Contains(titles, witcher.Title) {
 			t.Fatalf("collection children = %v", titles)
 		}
@@ -236,21 +223,17 @@ func TestChildCountsAndDetailGroupChildrenByKind(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var got [][]string
-		for _, group := range detail.Children {
-			titles := []string{string(group.Kind)}
-			for _, child := range group.Games {
-				assertParent(t, child, &parent)
-				titles = append(titles, child.Title)
-			}
-			got = append(got, titles)
-		}
+		got := groupedTitles(t, detail, &parent)
 		want := [][]string{
-			{"edition", complete.Title},
-			{"expansion", bloodAndWine.Title, heartsOfStone.Title},
-			{"update", nextGen.Title},
+			{complete.Title},
+			{bloodAndWine.Title, heartsOfStone.Title},
+			{nextGen.Title},
 		}
-		if detail.Game.ID != parent.ID || !slices.EqualFunc(got, want, slices.Equal) {
+		kinds := []Kind{}
+		for _, group := range detail.Children {
+			kinds = append(kinds, group.Kind)
+		}
+		if detail.Game.ID != parent.ID || !slices.Equal(kinds, []Kind{KindEdition, KindExpansion, KindUpdate}) || !slices.EqualFunc(got, want, slices.Equal) {
 			t.Fatalf("detail children = %v, want %v", got, want)
 		}
 	})
@@ -313,30 +296,28 @@ func TestImporterDetachesGamesWhoseParentIsUnknown(t *testing.T) {
 	}
 }
 
+var searchable = []SourceGame{witcher, goty, complete, anniversary, bloodAndWine, heartsOfStone, nextGen, witcherBundle, re2, re2Remake}
+
+func searchHits(t *testing.T, store *Store, matches []SourceGame, categories ...Category) []SearchHit {
+	t.Helper()
+	source := &fakeSource{games: matches, known: searchable}
+	hits, err := NewImporter(source, store).Search(t.Context(), "witcher 3", categories, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hits
+}
+
 func TestImporterSearchBundlesHitsUnderParents(t *testing.T) {
 	store, _ := newTestStore(t)
-	known := []SourceGame{witcher, goty, complete, anniversary, bloodAndWine, heartsOfStone, nextGen, witcherBundle, re2, re2Remake}
-	search := func(t *testing.T, matches []SourceGame, categories ...Category) []SearchHit {
-		t.Helper()
-		source := &fakeSource{games: matches, known: known}
-		hits, err := NewImporter(source, store).Search(t.Context(), "witcher 3", categories, 20)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return hits
-	}
 
 	t.Run("without filter every parent appears once with matched children", func(t *testing.T) {
-		hits := search(t, []SourceGame{witcher, witcherBundle, nextGen, goty, bloodAndWine, heartsOfStone, anniversary})
-		if len(hits) != 2 || hits[0].Game.Title != witcher.Title || hits[1].Game.Title != witcherBundle.Title {
+		hits := searchHits(t, store, []SourceGame{witcher, witcherBundle, nextGen, goty, bloodAndWine, heartsOfStone, anniversary})
+		if !slices.Equal(hitTitles(hits), []string{witcher.Title, witcherBundle.Title}) {
 			t.Fatalf("hits = %+v", hits)
 		}
-		var matched []string
-		for _, child := range hits[0].MatchedChildren {
-			matched = append(matched, child.Title)
-		}
-		if want := []string{nextGen.Title, goty.Title, bloodAndWine.Title, heartsOfStone.Title, anniversary.Title}; !slices.Equal(matched, want) {
-			t.Fatalf("matched children = %v, want %v", matched, want)
+		if want := []string{nextGen.Title, goty.Title, bloodAndWine.Title, heartsOfStone.Title, anniversary.Title}; !slices.Equal(titles(hits[0].MatchedChildren), want) {
+			t.Fatalf("matched children = %v, want %v", titles(hits[0].MatchedChildren), want)
 		}
 		want := []KindCount{{KindEdition, 3}, {KindExpansion, 2}, {KindUpdate, 1}}
 		if !slices.Equal(hits[0].ChildCounts, want) || len(hits[1].ChildCounts) != 0 {
@@ -344,19 +325,24 @@ func TestImporterSearchBundlesHitsUnderParents(t *testing.T) {
 		}
 	})
 	t.Run("a child-only match still yields its parent", func(t *testing.T) {
-		hits := search(t, []SourceGame{bloodAndWine})
-		if len(hits) != 1 || hits[0].Game.Title != witcher.Title || len(hits[0].MatchedChildren) != 1 || hits[0].MatchedChildren[0].Title != bloodAndWine.Title {
+		hits := searchHits(t, store, []SourceGame{bloodAndWine})
+		if !slices.Equal(hitTitles(hits), []string{witcher.Title}) || !slices.Equal(titles(hits[0].MatchedChildren), []string{bloodAndWine.Title}) {
 			t.Fatalf("hits = %+v", hits)
 		}
 	})
 	t.Run("remake bundles under the original", func(t *testing.T) {
-		hits := search(t, []SourceGame{re2Remake, re2})
-		if len(hits) != 1 || hits[0].Game.Title != re2.Title || hits[0].Game.Kind != KindGame || hits[0].MatchedChildren[0].Kind != KindRemake {
+		hits := searchHits(t, store, []SourceGame{re2Remake, re2})
+		if len(hits) != 1 || hits[0].Game.Kind != KindGame || hits[0].MatchedChildren[0].Kind != KindRemake {
 			t.Fatalf("hits = %+v", hits)
 		}
 	})
+}
+
+func TestImporterSearchFiltersByKind(t *testing.T) {
+	store, _ := newTestStore(t)
+
 	t.Run("kind filter yields a flat list with parent references", func(t *testing.T) {
-		hits := search(t, []SourceGame{bloodAndWine, heartsOfStone}, CategoryExpansion)
+		hits := searchHits(t, store, []SourceGame{bloodAndWine, heartsOfStone}, CategoryExpansion)
 		if len(hits) != 2 {
 			t.Fatalf("hits = %+v", hits)
 		}
@@ -367,24 +353,60 @@ func TestImporterSearchBundlesHitsUnderParents(t *testing.T) {
 		}
 	})
 	t.Run("filters are forwarded and applied locally", func(t *testing.T) {
-		source := &fakeSource{games: []SourceGame{witcher, nextGen, bloodAndWine}, known: known}
-		hits, err := NewImporter(source, store).Search(t.Context(), "witcher 3", []Category{CategoryDLC, CategoryDLC}, 20)
-		if err != nil {
-			t.Fatal(err)
-		}
+		source := &fakeSource{games: []SourceGame{witcher, nextGen, bloodAndWine}, known: searchable}
+		hits := must(NewImporter(source, store).Search(t.Context(), "witcher 3", []Category{CategoryDLC, CategoryDLC}, 20))
 		if !slices.Equal(source.filter.Kinds, []Kind{KindDLC, KindPack, KindUpdate}) || source.filter.Parents {
 			t.Fatalf("provider filter = %+v", source.filter)
 		}
-		if len(hits) != 1 || hits[0].Game.Title != nextGen.Title {
+		if !slices.Equal(hitTitles(hits), []string{nextGen.Title}) {
 			t.Fatalf("dlc hits = %+v", hits)
 		}
 	})
 	t.Run("game filter yields parents with counts only", func(t *testing.T) {
-		hits := search(t, []SourceGame{witcher, witcherBundle, bloodAndWine}, CategoryGame)
-		if len(hits) != 2 || hits[0].Game.Title != witcher.Title || hits[1].Game.Title != witcherBundle.Title || len(hits[0].ChildCounts) == 0 {
+		hits := searchHits(t, store, []SourceGame{witcher, witcherBundle, bloodAndWine}, CategoryGame)
+		if !slices.Equal(hitTitles(hits), []string{witcher.Title, witcherBundle.Title}) || len(hits[0].ChildCounts) == 0 {
 			t.Fatalf("game hits = %+v", hits)
 		}
 	})
+}
+
+func assertUnchanged(t *testing.T, before, after map[string]Game) {
+	t.Helper()
+	for title, game := range before {
+		if after[title].ID != game.ID || !after[title].UpdatedAt.Equal(game.UpdatedAt) {
+			t.Fatalf("%s changed identity or timestamp", title)
+		}
+	}
+}
+
+// groupedTitles returns the child titles of each kind group and checks that
+// every child references parent.
+func groupedTitles(t *testing.T, detail Detail, parent *Game) [][]string {
+	t.Helper()
+	var groups [][]string
+	for _, group := range detail.Children {
+		for _, child := range group.Games {
+			assertParent(t, child, parent)
+		}
+		groups = append(groups, titles(group.Games))
+	}
+	return groups
+}
+
+func titles(games []Game) []string {
+	result := []string{}
+	for _, game := range games {
+		result = append(result, game.Title)
+	}
+	return result
+}
+
+func hitTitles(hits []SearchHit) []string {
+	result := []string{}
+	for _, hit := range hits {
+		result = append(result, hit.Game.Title)
+	}
+	return result
 }
 
 func must[T any](value T, err error) T {

@@ -249,39 +249,54 @@ func (i *Importer) Search(ctx context.Context, query string, categories []Catego
 // bundle turns matches into hits: with a filter as a flat list of matching
 // games, otherwise one hit per parent in order of its first match.
 func bundle(matches, stored []Game, filter SearchFilter) []SearchHit {
-	hits := []SearchHit{}
 	if !filter.empty() {
-		for _, game := range matches {
-			if filter.matches(game) {
-				hits = append(hits, SearchHit{Game: game, ChildCounts: []KindCount{}, MatchedChildren: []Game{}})
-			}
-		}
-		return hits
+		return flatHits(matches, filter)
 	}
 	byID := make(map[string]Game, len(stored))
 	for _, game := range stored {
 		byID[game.ID] = game
 	}
+	hits := []SearchHit{}
 	index := map[string]int{}
 	for _, game := range matches {
-		parent, isChild := game, false
-		if game.Parent != nil {
-			parent, isChild = byID[game.Parent.ID]
-		}
-		if !isChild {
-			parent = game
-		}
+		parent, isChild := parentOf(game, byID)
 		position, ok := index[parent.ID]
 		if !ok {
 			position = len(hits)
 			index[parent.ID] = position
-			hits = append(hits, SearchHit{Game: parent, ChildCounts: []KindCount{}, MatchedChildren: []Game{}})
+			hits = append(hits, newHit(parent))
 		}
 		if isChild {
 			hits[position].MatchedChildren = append(hits[position].MatchedChildren, game)
 		}
 	}
 	return hits
+}
+
+func flatHits(matches []Game, filter SearchFilter) []SearchHit {
+	hits := []SearchHit{}
+	for _, game := range matches {
+		if filter.matches(game) {
+			hits = append(hits, newHit(game))
+		}
+	}
+	return hits
+}
+
+// parentOf returns the stored parent of game, or game itself when it has none
+// in the batch.
+func parentOf(game Game, byID map[string]Game) (Game, bool) {
+	if game.Parent == nil {
+		return game, false
+	}
+	if parent, ok := byID[game.Parent.ID]; ok {
+		return parent, true
+	}
+	return game, false
+}
+
+func newHit(game Game) SearchHit {
+	return SearchHit{Game: game, ChildCounts: []KindCount{}, MatchedChildren: []Game{}}
 }
 
 // Import fetches provider details for the given external IDs and upserts them
@@ -356,48 +371,77 @@ func (i *Importer) withRelatives(ctx context.Context, found []SourceGame) (sourc
 		batch.add(game)
 	}
 	batch.matches = len(batch.games)
+	if err := i.addAncestors(ctx, &batch); err != nil {
+		return sourceBatch{}, err
+	}
+	if err := i.addDescendants(ctx, &batch, batch.detachOrphans()); err != nil {
+		return sourceBatch{}, err
+	}
+	return batch, nil
+}
+
+// addAncestors adds the missing parents of the batch, one level per request.
+func (i *Importer) addAncestors(ctx context.Context, batch *sourceBatch) error {
 	for range maxAncestorDepth {
 		missing := batch.missingParents()
 		if len(missing) == 0 {
-			break
+			return nil
 		}
 		parents, err := i.source.Games(ctx, missing)
 		if err != nil {
-			return sourceBatch{}, err
+			return err
 		}
 		for _, parent := range parents {
 			batch.add(parent)
 		}
 	}
+	return nil
+}
+
+// detachOrphans clears parents that are still missing and returns the
+// external IDs of every top-level game.
+func (b *sourceBatch) detachOrphans() []string {
 	var parentIDs []string
-	for index, game := range batch.games {
-		if game.ParentExternalID != "" && !batch.hasParent(game) {
-			batch.games[index].ParentExternalID = ""
+	for index, game := range b.games {
+		if game.ParentExternalID != "" && !b.hasParent(game) {
+			b.games[index].ParentExternalID = ""
 		}
-		if batch.games[index].ParentExternalID == "" {
+		if b.games[index].ParentExternalID == "" {
 			parentIDs = append(parentIDs, game.ExternalID)
 		}
 	}
+	return parentIDs
+}
+
+// addDescendants adds the children of parentIDs, one level per request.
+func (i *Importer) addDescendants(ctx context.Context, batch *sourceBatch, parentIDs []string) error {
 	queried := map[string]bool{}
 	for depth := 0; depth < maxDescendantDepth && len(parentIDs) > 0; depth++ {
 		children, err := i.source.Children(ctx, parentIDs)
 		if err != nil {
-			return sourceBatch{}, err
+			return err
 		}
 		for _, id := range parentIDs {
 			queried[id] = true
 		}
-		parentIDs = nil
-		for _, child := range children {
-			// A child that names a parent outside the batch belongs elsewhere.
-			if !batch.hasParent(child) {
-				continue
-			}
-			batch.add(child)
-			if !queried[child.ExternalID] && !slices.Contains(parentIDs, child.ExternalID) {
-				parentIDs = append(parentIDs, child.ExternalID)
-			}
+		parentIDs = batch.addChildren(children, queried)
+	}
+	return nil
+}
+
+// addChildren adds the children whose parent is part of the batch and returns
+// those not queried for children yet. A child that names a parent outside the
+// batch belongs elsewhere.
+func (b *sourceBatch) addChildren(children []SourceGame, queried map[string]bool) []string {
+	var next []string
+	for _, child := range children {
+		if !b.hasParent(child) {
+			continue
+		}
+		b.add(child)
+		if !queried[child.ExternalID] && !slices.Contains(next, child.ExternalID) {
+			next = append(next, child.ExternalID)
 		}
 	}
-	return batch, nil
+	return next
 }

@@ -28,6 +28,8 @@ var (
 	ErrInvalidRequest = errors.New("invalid catalog request")
 	// ErrNotFound marks a catalog game that does not exist.
 	ErrNotFound = errors.New("catalog game not found")
+	// ErrUnavailable marks a search that needs the provider while it is unavailable.
+	ErrUnavailable = errors.New("catalog provider unavailable")
 )
 
 // Kind classifies a catalog game. For children it is also the child type.
@@ -208,22 +210,18 @@ func NewImporter(source Source, store *Store) *Importer {
 // relatives. Without categories every parent appears once, carrying the
 // matched children; with categories the matches form a flat list.
 func (i *Importer) Search(ctx context.Context, query string, categories []Category, limit int) ([]SearchHit, error) {
-	query = strings.TrimSpace(query)
-	if length := utf8.RuneCountInString(query); length < minQueryLength || length > maxQueryLength {
-		return nil, fmt.Errorf("%w: query must contain %d to %d characters", ErrInvalidRequest, minQueryLength, maxQueryLength)
+	query, err := validateQuery(query)
+	if err != nil {
+		return nil, err
 	}
-	if limit < 1 || limit > maxSearchLimit {
-		return nil, fmt.Errorf("%w: limit must be between 1 and %d", ErrInvalidRequest, maxSearchLimit)
+	if err := validateLimit(limit); err != nil {
+		return nil, err
 	}
 	filter, err := newSearchFilter(categories)
 	if err != nil {
 		return nil, err
 	}
-	found, err := i.source.Search(ctx, query, filter, limit)
-	if err != nil {
-		return nil, err
-	}
-	matches, stored, err := i.save(ctx, found)
+	matches, stored, err := i.fetch(ctx, query, filter, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -244,6 +242,33 @@ func (i *Importer) Search(ctx context.Context, query string, categories []Catego
 		}
 	}
 	return hits, nil
+}
+
+// validateQuery returns query with surrounding whitespace removed and inner
+// whitespace collapsed, or an error when its length is out of bounds.
+func validateQuery(query string) (string, error) {
+	query = strings.Join(strings.Fields(query), " ")
+	if length := utf8.RuneCountInString(query); length < minQueryLength || length > maxQueryLength {
+		return "", fmt.Errorf("%w: query must contain %d to %d characters", ErrInvalidRequest, minQueryLength, maxQueryLength)
+	}
+	return query, nil
+}
+
+func validateLimit(limit int) error {
+	if limit < 1 || limit > maxSearchLimit {
+		return fmt.Errorf("%w: limit must be between 1 and %d", ErrInvalidRequest, maxSearchLimit)
+	}
+	return nil
+}
+
+// fetch searches the provider and stores the matches with their relatives.
+// It returns the stored matches in provider order plus every stored game.
+func (i *Importer) fetch(ctx context.Context, query string, filter SearchFilter, limit int) ([]Game, []Game, error) {
+	found, err := i.source.Search(ctx, query, filter, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	return i.save(ctx, found)
 }
 
 // bundle turns matches into hits: with a filter as a flat list of matching

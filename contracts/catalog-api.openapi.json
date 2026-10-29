@@ -3,7 +3,7 @@
   "info": {
     "title": "Unplayd catalog-api",
     "version": "0.1.0",
-    "description": "Phase 1 contract. Business endpoints are implemented in subsequent tickets; this file does not claim they are available."
+    "description": "Internal catalog API for the Nuxt BFF and the user API. Search, detail and batch are answered from the catalog's PostgreSQL store; IGDB only supplements searches."
   },
   "paths": {
     "/health/live": {
@@ -115,7 +115,7 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 512,
-              "description": "Opaque cursor; clients must not construct or interpret it."
+              "description": "Opaque cursor from nextCursor; clients must not construct or interpret it. It is only valid for the same query, kind filter and platformId; others are rejected with 400."
             }
           }
         ],
@@ -154,7 +154,7 @@
             "$ref": "./common.json#/components/responses/Unavailable"
           }
         },
-        "description": "Searches every kind of game. Editions, DLCs, expansions, remakes and other children are bundled under their parent unless a kind filter is given."
+        "description": "Searches every kind of game. Editions, DLCs, expansions, remakes and other children are bundled under their parent unless a kind filter is given. Results come from stored games whose title contains every query word, plus games IGDB returned for the same query and kind filter; inactive games are excluded. Hits are ordered by best match (exact title, title prefix, every word, IGDB-only match), then title. The first page asks IGDB once the same query and kind filter were not answered by IGDB within 24 hours, waiting at most 2 seconds; follow-up pages never contact IGDB. When IGDB fails or is slow, stored games are returned and IGDB is not asked again for 30 seconds; without any stored match the response is 503."
       }
     },
     "/games/{gameId}": {
@@ -210,7 +210,7 @@
             "$ref": "./common.json#/components/responses/Unavailable"
           }
         },
-        "description": "A parent lists its active children grouped by kind; a child references its parent and has no children."
+        "description": "A parent lists its active children grouped by kind; a child references its parent and has no children. Answered from stored games only, so it stays available while IGDB is down. Inactive games remain readable with isActive false. A gameId that is not a UUID is rejected with 400."
       }
     },
     "/games/batch": {
@@ -267,7 +267,7 @@
             }
           }
         },
-        "description": "Each requested ID appears exactly once in items, missingGameIds or inactiveGameIds. Result order is not guaranteed; associate by id. Children reference their parent so callers can group them; a batch may reference any stable game UUID, including children."
+        "description": "Each requested ID appears exactly once in items, missingGameIds or inactiveGameIds. Result order is not guaranteed; associate by id. IDs match case-insensitively and are returned in lowercase; IDs that repeat in any case are rejected with 400. Children reference their parent so callers can group them; a batch may reference any stable game UUID, including children. Answered from stored games only, so it stays available while IGDB is down."
       }
     }
   },

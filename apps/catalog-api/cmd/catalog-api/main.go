@@ -11,18 +11,22 @@ import (
 	"time"
 
 	"github.com/maxstue/unplayd/apps/catalog-api/internal/auth"
+	"github.com/maxstue/unplayd/apps/catalog-api/internal/catalog"
 	"github.com/maxstue/unplayd/apps/catalog-api/internal/database"
 	"github.com/maxstue/unplayd/apps/catalog-api/internal/httpapi"
 	"github.com/maxstue/unplayd/apps/catalog-api/internal/igdb"
+	"github.com/maxstue/unplayd/apps/catalog-api/internal/requestid"
 )
 
 func main() {
+	slog.SetDefault(slog.New(requestid.LogHandler{Handler: slog.NewJSONHandler(os.Stdout, nil)}))
 	authConfig, err := auth.Load(os.Getenv)
 	if err != nil {
 		slog.Error("invalid authentication configuration", "error", err)
 		os.Exit(1)
 	}
-	if _, err := database.Load(os.Getenv); err != nil {
+	databaseConfig, err := database.Load(os.Getenv)
+	if err != nil {
 		slog.Error("invalid database configuration", "error", err)
 		os.Exit(1)
 	}
@@ -39,13 +43,32 @@ func main() {
 		slog.Error("PORT must be between 1 and 65535")
 		os.Exit(1)
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	db, err := database.Open(ctx, databaseConfig)
+	if err != nil {
+		slog.Error("database unavailable", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(10)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+	store := catalog.NewStore(db)
+	var importer *catalog.Importer
+	if igdbConfig.Enabled() {
+		client, err := igdb.NewClient(igdbConfig)
+		if err != nil {
+			slog.Error("invalid IGDB configuration", "error", err)
+			os.Exit(1)
+		}
+		importer = catalog.NewImporter(client, store)
+	}
+	games := catalog.NewService(store, importer, catalog.DefaultSearchPolicy(), slog.Default())
 	server := &http.Server{
-		Addr: ":" + port, Handler: httpapi.NewHandler(authConfig.Token()),
+		Addr: ":" + port, Handler: httpapi.NewHandler(authConfig.Token(), games, slog.Default()),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
 		WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second,
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	shutdownDone := make(chan struct{})
 	go func() {
 		defer close(shutdownDone)
@@ -62,4 +85,5 @@ func main() {
 		os.Exit(1)
 	}
 	<-shutdownDone
+	games.Wait()
 }

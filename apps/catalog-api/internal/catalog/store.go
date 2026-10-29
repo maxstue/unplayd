@@ -303,11 +303,15 @@ func (h hierarchy) parent(ctx context.Context, id string) (string, error) {
 // ChildCounts returns the number of active children per kind for each of the
 // given parents, in presentation order. Parents without children are omitted.
 func (s *Store) ChildCounts(ctx context.Context, parentIDs []string) (map[string][]KindCount, error) {
+	return childCounts(ctx, s.db, parentIDs)
+}
+
+func childCounts(ctx context.Context, db querier, parentIDs []string) (map[string][]KindCount, error) {
 	counts := map[string][]KindCount{}
 	if len(parentIDs) == 0 {
 		return counts, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT parent_id, kind, count(*) FROM catalog.games
+	rows, err := db.QueryContext(ctx, `SELECT parent_id, kind, count(*) FROM catalog.games
 		WHERE parent_id = ANY($1::uuid[]) AND is_active
 		GROUP BY parent_id, kind ORDER BY parent_id, array_position($2::text[], kind)`,
 		pq.Array(parentIDs), pq.Array(kinds))

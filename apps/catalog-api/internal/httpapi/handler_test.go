@@ -11,7 +11,7 @@ import (
 
 func TestLivenessReturnsServiceIdentity(t *testing.T) {
 	response := httptest.NewRecorder()
-	NewHandler(strings.Repeat("x", 32)).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health/live", nil))
+	newTestHandler(strings.Repeat("x", 32), &fakeCatalog{}).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health/live", nil))
 	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("unexpected response: %d %v", response.Code, response.Header())
 	}
@@ -39,7 +39,7 @@ func TestRequestIDIsValidatedAndReturned(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "/health/live", nil)
 			r.Header.Set("X-Request-ID", tc.id)
 			response := httptest.NewRecorder()
-			NewHandler(strings.Repeat("x", 32)).ServeHTTP(response, r)
+			newTestHandler(strings.Repeat("x", 32), &fakeCatalog{}).ServeHTTP(response, r)
 			id := response.Header().Get("X-Request-ID")
 			if !requestIDPattern.MatchString(id) {
 				t.Fatalf("invalid response request ID: %q", id)
@@ -56,7 +56,7 @@ func TestRequestIDIsValidatedAndReturned(t *testing.T) {
 
 func TestProtectedRoutesRequireExactlyOneValidBearerToken(t *testing.T) {
 	token := rand.Text() + rand.Text()
-	handler := NewHandler(token)
+	handler := newTestHandler(token, &fakeCatalog{})
 	for _, tc := range []struct {
 		name    string
 		headers []string
@@ -86,13 +86,14 @@ func TestValidBearerReachesRouting(t *testing.T) {
 	token := rand.Text() + rand.Text()
 	for _, scheme := range []string{"Bearer", "bearer", "BEARER"} {
 		t.Run(scheme, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/games", nil)
+			req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
 			req.Header.Set("Authorization", scheme+" "+token)
 			response := httptest.NewRecorder()
-			NewHandler(token).ServeHTTP(response, req)
+			newTestHandler(token, &fakeCatalog{}).ServeHTTP(response, req)
 			if response.Code != http.StatusNotFound {
 				t.Fatalf("status = %d, want authenticated 404", response.Code)
 			}
+			assertError(t, response, http.StatusNotFound, "not_found")
 			if response.Header().Get("Cache-Control") != "no-store" {
 				t.Error("authenticated response must not be cached")
 			}
@@ -104,7 +105,7 @@ func TestValidBearerReachesRouting(t *testing.T) {
 }
 
 func TestOnlyExactGetLivenessIsPublic(t *testing.T) {
-	handler := NewHandler(rand.Text() + rand.Text())
+	handler := newTestHandler(rand.Text()+rand.Text(), &fakeCatalog{})
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodHead, "/health/live"},
 		{http.MethodPost, "/health/live"},
@@ -126,7 +127,7 @@ func TestEmptyConfiguredTokenFailsClosed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/games", nil)
 	req.Header.Set("Authorization", "Bearer ")
 	response := httptest.NewRecorder()
-	NewHandler("").ServeHTTP(response, req)
+	newTestHandler("", &fakeCatalog{}).ServeHTTP(response, req)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", response.Code)
 	}

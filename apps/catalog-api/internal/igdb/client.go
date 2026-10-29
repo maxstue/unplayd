@@ -20,15 +20,11 @@ import (
 )
 
 const (
-	source          = "igdb"
-	defaultAPIURL   = "https://api.igdb.com/v4"
-	defaultTokenURL = "https://id.twitch.tv/oauth2/token"
-	coverURLPrefix  = "https://images.igdb.com/igdb/image/upload/t_cover_big/"
-	gameFields      = "name,cover.image_id,platforms.name"
-	// searchGameTypes keeps trackable games: main games, expansions, standalone
-	// expansions, remakes, remasters, expanded games and ports. DLCs, bundles,
-	// mods, episodes, seasons, forks, packs and updates are excluded.
-	searchGameTypes  = "0,2,4,8,9,10,11"
+	source           = "igdb"
+	defaultAPIURL    = "https://api.igdb.com/v4"
+	defaultTokenURL  = "https://id.twitch.tv/oauth2/token"
+	coverURLPrefix   = "https://images.igdb.com/igdb/image/upload/t_cover_big/"
+	gameFields       = "name,cover.image_id,platforms.name,game_type,parent_game,version_parent"
 	maxResultLimit   = 500
 	maxAttempts      = 3
 	maxRetryAfter    = 5 * time.Second
@@ -47,6 +43,15 @@ var (
 	ErrRejected = errors.New("igdb rejected the request")
 
 	imageIDPattern = regexp.MustCompile(`^[a-z0-9]{1,64}$`)
+
+	// gameTypes maps IGDB game type IDs to catalog kinds. Editions are not a
+	// game type; IGDB marks them with version_parent instead.
+	gameTypes = map[int64]catalog.Kind{
+		0: catalog.KindGame, 1: catalog.KindDLC, 2: catalog.KindExpansion, 3: catalog.KindBundle,
+		4: catalog.KindStandaloneExpansion, 5: catalog.KindMod, 6: catalog.KindEpisode, 7: catalog.KindSeason,
+		8: catalog.KindRemake, 9: catalog.KindRemaster, 10: catalog.KindExpandedGame, 11: catalog.KindPort,
+		12: catalog.KindFork, 13: catalog.KindPack, 14: catalog.KindUpdate,
+	}
 )
 
 // Client calls IGDB with cached app tokens, client-side rate limits and
@@ -87,9 +92,8 @@ func NewClient(config Config) (*Client, error) {
 	}, nil
 }
 
-// Search returns trackable games whose title matches query, excluding editions,
-// add-ons and mods. Details by ID are not filtered.
-func (c *Client) Search(ctx context.Context, query string, limit int) ([]catalog.SourceGame, error) {
+// Search returns games of every kind whose title matches query, narrowed by filter.
+func (c *Client) Search(ctx context.Context, query string, filter catalog.SearchFilter, limit int) ([]catalog.SourceGame, error) {
 	query = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
 			return -1
@@ -100,26 +104,87 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]catalog
 		return nil, fmt.Errorf("%w: search requires a query and a limit between 1 and %d", ErrRejected, maxResultLimit)
 	}
 	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(query)
-	return c.games(ctx, fmt.Sprintf(`search "%s"; fields %s; where version_parent = null & game_type = (%s); limit %d;`, escaped, gameFields, searchGameTypes, limit))
+	where, err := filterCondition(filter)
+	if err != nil {
+		return nil, err
+	}
+	return c.games(ctx, fmt.Sprintf(`search "%s"; fields %s;%s limit %d;`, escaped, gameFields, where, limit))
+}
+
+// filterCondition translates filter into an Apicalypse where clause, or "" for
+// no filter. Parents are games without version_parent and parent_game.
+func filterCondition(filter catalog.SearchFilter) (string, error) {
+	var conditions, types []string
+	if filter.Parents {
+		conditions = append(conditions, "(version_parent = null & parent_game = null)")
+	}
+	for _, kind := range filter.Kinds {
+		if kind == catalog.KindEdition {
+			conditions = append(conditions, "version_parent != null")
+			continue
+		}
+		id, ok := gameTypeID(kind)
+		if !ok {
+			return "", fmt.Errorf("%w: unsupported kind %q", ErrRejected, kind)
+		}
+		types = append(types, strconv.FormatInt(id, 10))
+	}
+	if len(types) > 0 {
+		conditions = append(conditions, fmt.Sprintf("(version_parent = null & game_type = (%s))", strings.Join(types, ",")))
+	}
+	if len(conditions) == 0 {
+		return "", nil
+	}
+	return " where " + strings.Join(conditions, " | ") + ";", nil
+}
+
+func gameTypeID(kind catalog.Kind) (int64, bool) {
+	for id, candidate := range gameTypes {
+		if candidate == kind {
+			return id, true
+		}
+	}
+	return 0, false
 }
 
 // Games returns details for the given IGDB game IDs. Unknown IDs are omitted.
 func (c *Client) Games(ctx context.Context, externalIDs []string) ([]catalog.SourceGame, error) {
-	if len(externalIDs) < 1 || len(externalIDs) > maxResultLimit {
-		return nil, fmt.Errorf("%w: details require 1 to %d IDs", ErrRejected, maxResultLimit)
-	}
-	for _, id := range externalIDs {
-		if value, err := strconv.ParseUint(id, 10, 63); err != nil || value == 0 || strconv.FormatUint(value, 10) != id {
-			return nil, fmt.Errorf("%w: IGDB IDs must be positive integers", ErrRejected)
-		}
+	if err := validateIDs(externalIDs); err != nil {
+		return nil, err
 	}
 	return c.games(ctx, fmt.Sprintf(`fields %s; where id = (%s); limit %d;`, gameFields, strings.Join(externalIDs, ","), len(externalIDs)))
 }
 
+// Children returns editions, add-ons and other games whose direct parent is one
+// of parentIDs, up to IGDB's per-request limit, in one request.
+func (c *Client) Children(ctx context.Context, parentIDs []string) ([]catalog.SourceGame, error) {
+	if err := validateIDs(parentIDs); err != nil {
+		return nil, err
+	}
+	ids := strings.Join(parentIDs, ",")
+	return c.games(ctx, fmt.Sprintf(`fields %s; where parent_game = (%s) | version_parent = (%s); sort id asc; limit %d;`,
+		gameFields, ids, ids, maxResultLimit))
+}
+
+func validateIDs(ids []string) error {
+	if len(ids) < 1 || len(ids) > maxResultLimit {
+		return fmt.Errorf("%w: requests require 1 to %d IDs", ErrRejected, maxResultLimit)
+	}
+	for _, id := range ids {
+		if value, err := strconv.ParseUint(id, 10, 63); err != nil || value == 0 || strconv.FormatUint(value, 10) != id {
+			return fmt.Errorf("%w: IGDB IDs must be positive integers", ErrRejected)
+		}
+	}
+	return nil
+}
+
 type igdbGame struct {
-	ID    int64  `json:"id"`
-	Name  string `json:"name"`
-	Cover *struct {
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	GameType      *int64 `json:"game_type"`
+	ParentGame    int64  `json:"parent_game"`
+	VersionParent int64  `json:"version_parent"`
+	Cover         *struct {
 		ImageID string `json:"image_id"`
 	} `json:"cover"`
 	Platforms []struct {
@@ -147,6 +212,8 @@ func (c *Client) games(ctx context.Context, query string) ([]catalog.SourceGame,
 }
 
 // mapGame skips entries the catalog cannot store and drops invalid optional data.
+// version_parent takes precedence over parent_game and marks an edition, even
+// when IGDB types the edition as a bundle. Unknown game types count as games.
 func mapGame(game igdbGame) (catalog.SourceGame, bool) {
 	title := strings.TrimSpace(game.Name)
 	if game.ID <= 0 || title == "" {
@@ -154,7 +221,19 @@ func mapGame(game igdbGame) (catalog.SourceGame, bool) {
 	}
 	mapped := catalog.SourceGame{
 		Source: source, ExternalID: strconv.FormatInt(game.ID, 10), Title: title,
-		Platforms: []catalog.SourcePlatform{},
+		Kind: catalog.KindGame, Platforms: []catalog.SourcePlatform{},
+	}
+	if game.GameType != nil {
+		if kind, ok := gameTypes[*game.GameType]; ok {
+			mapped.Kind = kind
+		}
+	}
+	parent := game.ParentGame
+	if game.VersionParent > 0 && game.VersionParent != game.ID {
+		parent, mapped.Kind = game.VersionParent, catalog.KindEdition
+	}
+	if parent > 0 && parent != game.ID {
+		mapped.ParentExternalID = strconv.FormatInt(parent, 10)
 	}
 	if game.Cover != nil && imageIDPattern.MatchString(game.Cover.ImageID) {
 		mapped.CoverURL = coverURLPrefix + game.Cover.ImageID + ".jpg"

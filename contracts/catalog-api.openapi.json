@@ -81,6 +81,22 @@
             }
           },
           {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "description": "Repeatable category filter. Without it every parent appears once, carrying its matched children. With child categories the result is a flat list of matching games with their parent; game selects parents only. Several values combine as a union.",
+            "schema": {
+              "type": "array",
+              "uniqueItems": true,
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/components/schemas/KindFilter"
+              }
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -137,7 +153,8 @@
           "503": {
             "$ref": "./common.json#/components/responses/Unavailable"
           }
-        }
+        },
+        "description": "Searches every kind of game. Editions, DLCs, expansions, remakes and other children are bundled under their parent unless a kind filter is given."
       }
     },
     "/games/{gameId}": {
@@ -169,7 +186,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Game"
+                  "$ref": "#/components/schemas/GameDetail"
                 }
               }
             }
@@ -192,7 +209,8 @@
           "503": {
             "$ref": "./common.json#/components/responses/Unavailable"
           }
-        }
+        },
+        "description": "A parent lists its active children grouped by kind; a child references its parent and has no children."
       }
     },
     "/games/batch": {
@@ -249,7 +267,7 @@
             }
           }
         },
-        "description": "Each requested ID appears exactly once in items, missingGameIds or inactiveGameIds. Result order is not guaranteed; associate by id."
+        "description": "Each requested ID appears exactly once in items, missingGameIds or inactiveGameIds. Result order is not guaranteed; associate by id. Children reference their parent so callers can group them; a batch may reference any stable game UUID, including children."
       }
     }
   },
@@ -282,6 +300,33 @@
         },
         "required": ["id", "name"]
       },
+      "GameKind": {
+        "type": "string",
+        "enum": [
+          "game",
+          "edition",
+          "dlc",
+          "expansion",
+          "standalone_expansion",
+          "pack",
+          "update",
+          "bundle",
+          "remake",
+          "remaster",
+          "expanded_game",
+          "port",
+          "mod",
+          "fork",
+          "episode",
+          "season"
+        ],
+        "description": "Kind of a catalog game. For children it is also the child type."
+      },
+      "KindFilter": {
+        "type": "string",
+        "enum": ["game", "dlc", "expansion", "edition", "remake", "port", "mod", "episode"],
+        "description": "Search category. game: parents. dlc: dlc, pack, update. expansion: expansion, standalone_expansion. edition: edition, bundle, expanded_game. remake: remake, remaster. port: port. mod: mod, fork. episode: episode, season."
+      },
       "Game": {
         "type": "object",
         "additionalProperties": false,
@@ -293,6 +338,26 @@
           "title": {
             "type": "string",
             "minLength": 1
+          },
+          "kind": {
+            "$ref": "#/components/schemas/GameKind"
+          },
+          "parent": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["id", "title"],
+            "description": "Parent of a child game; null for parents. The hierarchy has a single level."
           },
           "coverUrl": {
             "type": "string",
@@ -314,7 +379,89 @@
             "description": "UTC ISO-8601 timestamp with Z suffix."
           }
         },
-        "required": ["id", "title", "coverUrl", "platforms", "isActive", "updatedAt"]
+        "required": [
+          "id",
+          "title",
+          "kind",
+          "parent",
+          "coverUrl",
+          "platforms",
+          "isActive",
+          "updatedAt"
+        ]
+      },
+      "KindCount": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/GameKind"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": ["kind", "count"]
+      },
+      "ChildGroup": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/GameKind"
+          },
+          "games": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/Game"
+            },
+            "description": "Sorted by title."
+          }
+        },
+        "required": ["kind", "games"]
+      },
+      "GameDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChildGroup"
+            },
+            "description": "Active children grouped by kind in GameKind order; empty for children."
+          }
+        },
+        "required": ["game", "children"]
+      },
+      "GameSearchHit": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "childCounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KindCount"
+            },
+            "description": "Active children per kind in GameKind order; empty for children."
+          },
+          "matchedChildren": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Game"
+            },
+            "description": "Children of this parent that matched the query. Only filled without a kind filter."
+          }
+        },
+        "required": ["game", "childCounts", "matchedChildren"]
       },
       "GamePage": {
         "type": "object",
@@ -323,7 +470,7 @@
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Game"
+              "$ref": "#/components/schemas/GameSearchHit"
             }
           },
           "nextCursor": {

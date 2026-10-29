@@ -121,7 +121,7 @@ func TestSearchMapsGamesWithCoversAndPlatforms(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer "+issuedToken(1) {
 			t.Error("IGDB request did not use the issued app token")
 		}
-		want := `search "Zelda \"Breath\" \\"; fields name,cover.image_id,platforms.name; where version_parent = null & game_type = (0,2,4,8,9,10,11); limit 10;`
+		want := `search "Zelda \"Breath\" \\"; fields name,cover.image_id,platforms.name,game_type,parent_game,version_parent; limit 10;`
 		if body := readBody(t, r); body != want {
 			t.Errorf("query = %q, want %q", body, want)
 		}
@@ -134,16 +134,16 @@ func TestSearchMapsGamesWithCoversAndPlatforms(t *testing.T) {
 			{"id": 0, "name": "Missing identity"}
 		]`)
 	})
-	games, err := client.Search(t.Context(), " Zelda \"Breath\" \\\x00 ", 10)
+	games, err := client.Search(t.Context(), " Zelda \"Breath\" \\\x00 ", catalog.SearchFilter{}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []catalog.SourceGame{
-		{Source: "igdb", ExternalID: "7346", Title: "The Legend of Zelda: Breath of the Wild",
+		{Source: "igdb", ExternalID: "7346", Title: "The Legend of Zelda: Breath of the Wild", Kind: catalog.KindGame,
 			CoverURL:  "https://images.igdb.com/igdb/image/upload/t_cover_big/co3p2d.jpg",
 			Platforms: []catalog.SourcePlatform{{ExternalID: "130", Name: "Nintendo Switch"}, {ExternalID: "41", Name: "Wii U"}}},
-		{Source: "igdb", ExternalID: "1", Title: "Unsafe cover", Platforms: []catalog.SourcePlatform{}},
-		{Source: "igdb", ExternalID: "2", Title: "No cover", Platforms: []catalog.SourcePlatform{}},
+		{Source: "igdb", ExternalID: "1", Title: "Unsafe cover", Kind: catalog.KindGame, Platforms: []catalog.SourcePlatform{}},
+		{Source: "igdb", ExternalID: "2", Title: "No cover", Kind: catalog.KindGame, Platforms: []catalog.SourcePlatform{}},
 	}
 	if !reflect.DeepEqual(games, want) {
 		t.Fatalf("mapped games = %+v, want %+v", games, want)
@@ -152,7 +152,7 @@ func TestSearchMapsGamesWithCoversAndPlatforms(t *testing.T) {
 
 func TestGamesRequestsDetailsByExternalID(t *testing.T) {
 	_, client := newFakeIGDB(t, func(w http.ResponseWriter, r *http.Request) {
-		want := `fields name,cover.image_id,platforms.name; where id = (1942,7346); limit 2;`
+		want := `fields name,cover.image_id,platforms.name,game_type,parent_game,version_parent; where id = (1942,7346); limit 2;`
 		if body := readBody(t, r); body != want {
 			t.Errorf("query = %q, want %q", body, want)
 		}
@@ -161,6 +161,92 @@ func TestGamesRequestsDetailsByExternalID(t *testing.T) {
 	games, err := client.Games(t.Context(), []string{"1942", "7346"})
 	if err != nil || len(games) != 1 || games[0].ExternalID != "1942" {
 		t.Fatalf("unexpected details: %+v, %v", games, err)
+	}
+}
+
+func TestGamesMapKindsAndParents(t *testing.T) {
+	// Shapes taken from live IGDB responses for The Witcher 3 and Resident Evil 2.
+	_, client := newFakeIGDB(t, respond(http.StatusOK, `[
+		{"id": 1942, "name": "The Witcher 3: Wild Hunt", "game_type": 0},
+		{"id": 22439, "name": "The Witcher 3: Wild Hunt - Game of the Year Edition", "version_parent": 1942, "game_type": 3},
+		{"id": 13166, "name": "The Witcher 3: Wild Hunt - Blood and Wine", "parent_game": 1942, "game_type": 2},
+		{"id": 230102, "name": "The Witcher 3: Wild Hunt - Free Next-Gen Update", "parent_game": 1942, "game_type": 14},
+		{"id": 141472, "name": "The Witcher 3: Wild Hunt + Dark Souls III", "game_type": 3},
+		{"id": 19686, "name": "Resident Evil 2", "parent_game": 880, "game_type": 8},
+		{"id": 146147, "name": "Collector's Edition", "parent_game": 122611, "version_parent": 146146, "game_type": 9},
+		{"id": 5, "name": "Unknown type", "game_type": 99, "parent_game": 5},
+		{"id": 6, "name": "No type"}
+	]`))
+	games, err := client.Games(t.Context(), []string{"1942"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		kind   catalog.Kind
+		parent string
+	}{
+		{catalog.KindGame, ""},
+		{catalog.KindEdition, "1942"},
+		{catalog.KindExpansion, "1942"},
+		{catalog.KindUpdate, "1942"},
+		{catalog.KindBundle, ""},
+		{catalog.KindRemake, "880"},
+		{catalog.KindEdition, "146146"},
+		{catalog.KindGame, ""},
+		{catalog.KindGame, ""},
+	}
+	if len(games) != len(want) {
+		t.Fatalf("mapped %d games, want %d", len(games), len(want))
+	}
+	for i, game := range games {
+		if game.Kind != want[i].kind || game.ParentExternalID != want[i].parent {
+			t.Errorf("%s: kind %q parent %q, want %q %q", game.Title, game.Kind, game.ParentExternalID, want[i].kind, want[i].parent)
+		}
+	}
+}
+
+func TestSearchTranslatesKindFilters(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		filter catalog.SearchFilter
+		where  string
+	}{
+		{"no filter", catalog.SearchFilter{}, ""},
+		{"parents", catalog.SearchFilter{Parents: true}, " where (version_parent = null & parent_game = null);"},
+		{"expansions", catalog.SearchFilter{Kinds: []catalog.Kind{catalog.KindExpansion, catalog.KindStandaloneExpansion}},
+			" where (version_parent = null & game_type = (2,4));"},
+		{"editions and parents", catalog.SearchFilter{Parents: true, Kinds: []catalog.Kind{catalog.KindEdition, catalog.KindBundle}},
+			" where (version_parent = null & parent_game = null) | version_parent != null | (version_parent = null & game_type = (3));"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, client := newFakeIGDB(t, func(w http.ResponseWriter, r *http.Request) {
+				want := `search "witcher 3"; fields ` + gameFields + `;` + tc.where + ` limit 5;`
+				if body := readBody(t, r); body != want {
+					t.Errorf("query = %q, want %q", body, want)
+				}
+				_, _ = io.WriteString(w, `[]`)
+			})
+			if _, err := client.Search(t.Context(), "witcher 3", tc.filter, 5); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestChildrenRequestsAllChildrenOfParentsInOneQuery(t *testing.T) {
+	fake, client := newFakeIGDB(t, func(w http.ResponseWriter, r *http.Request) {
+		want := `fields ` + gameFields + `; where parent_game = (1942,880) | version_parent = (1942,880); sort id asc; limit 500;`
+		if body := readBody(t, r); body != want {
+			t.Errorf("query = %q, want %q", body, want)
+		}
+		_, _ = io.WriteString(w, `[{"id": 12503, "name": "Hearts of Stone", "parent_game": 1942, "game_type": 2}]`)
+	})
+	children, err := client.Children(t.Context(), []string{"1942", "880"})
+	if err != nil || len(children) != 1 || children[0].ParentExternalID != "1942" || children[0].Kind != catalog.KindExpansion {
+		t.Fatalf("children = %+v, %v", children, err)
+	}
+	if fake.gameCalls.Load() != 1 {
+		t.Fatalf("game calls = %d, want 1", fake.gameCalls.Load())
 	}
 }
 
@@ -174,10 +260,20 @@ func TestInvalidRequestsAreRejectedWithoutCallingIGDB(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"empty query", func() error { _, err := client.Search(t.Context(), " \n\t", 10); return err }},
-		{"zero limit", func() error { _, err := client.Search(t.Context(), "zelda", 0); return err }},
-		{"limit above IGDB maximum", func() error { _, err := client.Search(t.Context(), "zelda", maxResultLimit+1); return err }},
+		{"empty query", func() error { _, err := client.Search(t.Context(), " \n\t", catalog.SearchFilter{}, 10); return err }},
+		{"zero limit", func() error { _, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{}, 0); return err }},
+		{"limit above IGDB maximum", func() error {
+			_, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{}, maxResultLimit+1)
+			return err
+		}},
+		{"unsupported kind", func() error {
+			_, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{Kinds: []catalog.Kind{"sequel"}}, 10)
+			return err
+		}},
 		{"no IDs", func() error { _, err := client.Games(t.Context(), nil); return err }},
+		{"no parent IDs", func() error { _, err := client.Children(t.Context(), nil); return err }},
+		{"too many parent IDs", func() error { _, err := client.Children(t.Context(), tooMany); return err }},
+		{"parent ID injection", func() error { _, err := client.Children(t.Context(), []string{"1) | id > (0"}); return err }},
 		{"too many IDs", func() error { _, err := client.Games(t.Context(), tooMany); return err }},
 		{"zero ID", func() error { _, err := client.Games(t.Context(), []string{"0"}); return err }},
 		{"negative ID", func() error { _, err := client.Games(t.Context(), []string{"-1"}); return err }},
@@ -204,7 +300,7 @@ func TestAccessTokenIsCachedUntilShortlyBeforeExpiry(t *testing.T) {
 	client.now = func() time.Time { return now }
 	search := func() string {
 		t.Helper()
-		games, err := client.Search(t.Context(), "zelda", 1)
+		games, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{}, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -234,7 +330,7 @@ func TestRejectedTokenIsRenewedOnce(t *testing.T) {
 			}
 			_, _ = io.WriteString(w, `[]`)
 		})
-		if _, err := client.Search(t.Context(), "zelda", 1); err != nil {
+		if _, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{}, 1); err != nil {
 			t.Fatal(err)
 		}
 		if fake.tokenCalls.Load() != 2 || fake.gameCalls.Load() != 2 {
@@ -243,7 +339,7 @@ func TestRejectedTokenIsRenewedOnce(t *testing.T) {
 	})
 	t.Run("persistent rejection stops after one renewal", func(t *testing.T) {
 		fake, client := newFakeIGDB(t, respond(http.StatusUnauthorized, ""))
-		_, err := client.Search(t.Context(), "zelda", 1)
+		_, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{}, 1)
 		if !errors.Is(err, ErrRejected) || fake.tokenCalls.Load() != 2 || fake.gameCalls.Load() != 2 {
 			t.Fatalf("err = %v, token calls = %d, game calls = %d", err, fake.tokenCalls.Load(), fake.gameCalls.Load())
 		}
@@ -271,7 +367,7 @@ func TestTransientFailuresAreRetriedWithinBounds(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake, client := newFakeIGDB(t, tc.handler)
-			_, err := client.Search(t.Context(), "zelda", 1)
+			_, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{}, 1)
 			if tc.expected == nil && err != nil || tc.expected != nil && !errors.Is(err, tc.expected) {
 				t.Fatalf("err = %v, want %v", err, tc.expected)
 			}
@@ -293,7 +389,7 @@ func TestAttemptTimeoutIsRetriedThenReportedUnavailable(t *testing.T) {
 		}
 	})
 	client.timeout = 20 * time.Millisecond
-	_, err := client.Search(t.Context(), "zelda", 1)
+	_, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{}, 1)
 	if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "timed out") || fake.gameCalls.Load() != maxAttempts {
 		t.Fatalf("err = %v, game calls = %d", err, fake.gameCalls.Load())
 	}
@@ -307,13 +403,13 @@ func TestCanceledContextStopsWithoutRetry(t *testing.T) {
 		cancel()
 		w.WriteHeader(http.StatusServiceUnavailable)
 	})
-	if _, err := client.Search(ctx, "zelda", 1); !errors.Is(err, context.Canceled) {
+	if _, err := client.Search(ctx, "zelda", catalog.SearchFilter{}, 1); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 	if fake.gameCalls.Load() != 1 {
 		t.Fatalf("game calls = %d, want 1", fake.gameCalls.Load())
 	}
-	if _, err := client.Search(ctx, "zelda", 1); !errors.Is(err, context.Canceled) || fake.gameCalls.Load() != 1 {
+	if _, err := client.Search(ctx, "zelda", catalog.SearchFilter{}, 1); !errors.Is(err, context.Canceled) || fake.gameCalls.Load() != 1 {
 		t.Fatalf("canceled context reached IGDB: %v", err)
 	}
 }
@@ -335,7 +431,7 @@ func TestTokenEndpointFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fake, client := newFakeIGDB(t, respond(http.StatusOK, `[]`))
 			fake.tokenStatus, fake.tokenBody = tc.status, tc.body
-			_, err := client.Search(t.Context(), "zelda", 1)
+			_, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{}, 1)
 			if !errors.Is(err, tc.expected) || fake.tokenCalls.Load() != tc.tokenCalls || fake.gameCalls.Load() != 0 {
 				t.Fatalf("err = %v, token calls = %d, game calls = %d", err, fake.tokenCalls.Load(), fake.gameCalls.Load())
 			}
@@ -372,7 +468,7 @@ func TestOpenRequestsAreBounded(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 6 {
 		wg.Go(func() {
-			if _, err := client.Search(t.Context(), "zelda", 1); err != nil {
+			if _, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{}, 1); err != nil {
 				t.Error(err)
 			}
 		})
@@ -388,7 +484,7 @@ func TestRequestsAreSpacedByRateLimit(t *testing.T) {
 	client.rate = &limiter{interval: 25 * time.Millisecond}
 	started := time.Now()
 	for range 4 {
-		if _, err := client.Search(t.Context(), "zelda", 1); err != nil {
+		if _, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{}, 1); err != nil {
 			t.Fatal(err)
 		}
 	}

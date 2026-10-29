@@ -28,7 +28,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Search the catalog */
+        /**
+         * Search the catalog
+         * @description Searches every kind of game. Editions, DLCs, expansions, remakes and other children are bundled under their parent unless a kind filter is given.
+         */
         get: operations["searchGames"];
         put?: never;
         post?: never;
@@ -45,7 +48,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get a game by stable internal UUID */
+        /**
+         * Get a game by stable internal UUID
+         * @description A parent lists its active children grouped by kind; a child references its parent and has no children.
+         */
         get: operations["getGame"];
         put?: never;
         post?: never;
@@ -66,7 +72,7 @@ export interface paths {
         put?: never;
         /**
          * Resolve a bounded batch without N+1 requests
-         * @description Each requested ID appears exactly once in items, missingGameIds or inactiveGameIds. Result order is not guaranteed; associate by id.
+         * @description Each requested ID appears exactly once in items, missingGameIds or inactiveGameIds. Result order is not guaranteed; associate by id. Children reference their parent so callers can group them; a batch may reference any stable game UUID, including children.
          */
         post: operations["getGamesBatch"];
         delete?: never;
@@ -84,10 +90,27 @@ export interface components {
             id: string;
             name: string;
         };
+        /**
+         * @description Kind of a catalog game. For children it is also the child type.
+         * @enum {string}
+         */
+        GameKind: "game" | "edition" | "dlc" | "expansion" | "standalone_expansion" | "pack" | "update" | "bundle" | "remake" | "remaster" | "expanded_game" | "port" | "mod" | "fork" | "episode" | "season";
+        /**
+         * @description Search category. game: parents. dlc: dlc, pack, update. expansion: expansion, standalone_expansion. edition: edition, bundle, expanded_game. remake: remake, remaster. port: port. mod: mod, fork. episode: episode, season.
+         * @enum {string}
+         */
+        KindFilter: "game" | "dlc" | "expansion" | "edition" | "remake" | "port" | "mod" | "episode";
         Game: {
             /** Format: uuid */
             id: string;
             title: string;
+            kind: components["schemas"]["GameKind"];
+            /** @description Parent of a child game; null for parents. The hierarchy has a single level. */
+            parent: {
+                /** Format: uuid */
+                id: string;
+                title: string;
+            } | null;
             /** Format: uri */
             coverUrl: string | null;
             platforms: components["schemas"]["Platform"][];
@@ -98,6 +121,27 @@ export interface components {
              */
             updatedAt: string;
         };
+        KindCount: {
+            kind: components["schemas"]["GameKind"];
+            count: number;
+        };
+        ChildGroup: {
+            kind: components["schemas"]["GameKind"];
+            /** @description Sorted by title. */
+            games: components["schemas"]["Game"][];
+        };
+        GameDetail: {
+            game: components["schemas"]["Game"];
+            /** @description Active children grouped by kind in GameKind order; empty for children. */
+            children: components["schemas"]["ChildGroup"][];
+        };
+        GameSearchHit: {
+            game: components["schemas"]["Game"];
+            /** @description Active children per kind in GameKind order; empty for children. */
+            childCounts: components["schemas"]["KindCount"][];
+            /** @description Children of this parent that matched the query. Only filled without a kind filter. */
+            matchedChildren: components["schemas"]["Game"][];
+        };
         /**
          * @example {
          *       "items": [],
@@ -105,7 +149,7 @@ export interface components {
          *     }
          */
         GamePage: {
-            items: components["schemas"]["Game"][];
+            items: components["schemas"]["GameSearchHit"][];
             nextCursor: string | null;
         };
         GameBatchRequest: {
@@ -305,6 +349,8 @@ export interface operations {
             query: {
                 query: string;
                 platformId?: string;
+                /** @description Repeatable category filter. Without it every parent appears once, carrying its matched children. With child categories the result is a flat list of matching games with their parent; game selects parents only. Several values combine as a union. */
+                kind?: components["schemas"]["KindFilter"][];
                 limit?: number;
                 cursor?: string;
             };
@@ -354,7 +400,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Game"];
+                    "application/json": components["schemas"]["GameDetail"];
                 };
             };
             400: components["responses"]["BadRequest"];

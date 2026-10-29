@@ -229,11 +229,7 @@ func TestChildCountsAndDetailGroupChildrenByKind(t *testing.T) {
 			{bloodAndWine.Title, heartsOfStone.Title},
 			{nextGen.Title},
 		}
-		kinds := []Kind{}
-		for _, group := range detail.Children {
-			kinds = append(kinds, group.Kind)
-		}
-		if detail.Game.ID != parent.ID || !slices.Equal(kinds, []Kind{KindEdition, KindExpansion, KindUpdate}) || !slices.EqualFunc(got, want, slices.Equal) {
+		if detail.Game.ID != parent.ID || !slices.Equal(groupKinds(detail), []Kind{KindEdition, KindExpansion, KindUpdate}) || !slices.EqualFunc(got, want, slices.Equal) {
 			t.Fatalf("detail children = %v, want %v", got, want)
 		}
 	})
@@ -346,11 +342,7 @@ func TestImporterSearchFiltersByKind(t *testing.T) {
 		if len(hits) != 2 {
 			t.Fatalf("hits = %+v", hits)
 		}
-		for _, hit := range hits {
-			if hit.Game.Kind != KindExpansion || hit.Game.Parent == nil || hit.Game.Parent.Title != witcher.Title || len(hit.MatchedChildren) != 0 {
-				t.Fatalf("expansion hit = %+v", hit)
-			}
-		}
+		assertChildHits(t, hits, KindExpansion, witcher.Title)
 	})
 	t.Run("filters are forwarded and applied locally", func(t *testing.T) {
 		source := &fakeSource{games: []SourceGame{witcher, nextGen, bloodAndWine}, known: searchable}
@@ -368,6 +360,24 @@ func TestImporterSearchFiltersByKind(t *testing.T) {
 			t.Fatalf("game hits = %+v", hits)
 		}
 	})
+}
+
+// assertChildHits checks that every hit is a flat child of kind under parentTitle.
+func assertChildHits(t *testing.T, hits []SearchHit, kind Kind, parentTitle string) {
+	t.Helper()
+	for _, hit := range hits {
+		if hit.Game.Kind != kind || hit.Game.Parent == nil || hit.Game.Parent.Title != parentTitle || len(hit.MatchedChildren) != 0 {
+			t.Fatalf("%s hit = %+v", kind, hit)
+		}
+	}
+}
+
+func groupKinds(detail Detail) []Kind {
+	result := []Kind{}
+	for _, group := range detail.Children {
+		result = append(result, group.Kind)
+	}
+	return result
 }
 
 func assertUnchanged(t *testing.T, before, after map[string]Game) {

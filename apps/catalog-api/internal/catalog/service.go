@@ -48,13 +48,13 @@ type Service struct {
 	inflight      map[string]*refreshCall
 	coolingUntil  time.Time
 	refreshesDone sync.WaitGroup
-	lifecycle     context.Context
 	stopping      bool
 }
 
 type refreshCall struct {
-	done chan struct{}
-	err  error
+	done   chan struct{}
+	err    error
+	cancel context.CancelFunc
 }
 
 // NewService returns a catalog service. A nil importer answers every search
@@ -111,11 +111,15 @@ func (s *Service) Batch(ctx context.Context, ids []string) (Batch, error) {
 	return s.store.Batch(ctx, ids)
 }
 
-// SetLifecycle binds background refreshes to the process lifetime before serving requests.
-func (s *Service) SetLifecycle(ctx context.Context) { s.lifecycle = ctx }
-
-// Stop prevents new refreshes before waiting for outstanding work.
-func (s *Service) Stop() { s.mu.Lock(); s.stopping = true; s.mu.Unlock() }
+// Stop prevents new refreshes and cancels outstanding provider work.
+func (s *Service) Stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stopping = true
+	for _, call := range s.inflight {
+		call.cancel()
+	}
+}
 
 // Wait blocks until background refreshes have finished.
 func (s *Service) Wait() { s.refreshesDone.Wait() }
@@ -160,17 +164,13 @@ func (s *Service) start(ctx context.Context, query localQuery) (*refreshCall, er
 	if s.now().Before(s.coolingUntil) {
 		return nil, errCoolingDown
 	}
-	call := &refreshCall{done: make(chan struct{})}
+	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.policy.RefreshTimeout)
+	call := &refreshCall{done: make(chan struct{}), cancel: cancel}
 	s.inflight[query.key] = call
 	s.refreshesDone.Add(1)
 	go func() {
 		defer s.refreshesDone.Done()
-		refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.policy.RefreshTimeout)
 		defer cancel()
-		if s.lifecycle != nil {
-			stop := context.AfterFunc(s.lifecycle, cancel)
-			defer stop()
-		}
 		call.err = s.fetch(refreshCtx, query)
 		s.mu.Lock()
 		delete(s.inflight, query.key)

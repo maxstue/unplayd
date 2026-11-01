@@ -65,7 +65,6 @@ func main() {
 		importer = catalog.NewImporter(client, store)
 	}
 	games := catalog.NewService(store, importer, catalog.DefaultSearchPolicy(), slog.Default())
-	games.SetLifecycle(ctx)
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)

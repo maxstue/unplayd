@@ -232,3 +232,47 @@ func TestCleanupSkipsConcurrentSearchRenewal(t *testing.T) {
 		t.Fatalf("renewed query deleted: %d %v", n, err)
 	}
 }
+
+type blockedSearchSource struct {
+	Source
+	started chan struct{}
+}
+
+func (s blockedSearchSource) Search(ctx context.Context, _ string, _ SearchFilter, _ int) ([]SourceGame, error) {
+	close(s.started)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestServiceStopCancelsAndRejectsSearchRefreshes(t *testing.T) {
+	source := blockedSearchSource{started: make(chan struct{})}
+	service := newTestService(nil, source, DefaultSearchPolicy())
+	query, err := newLocalQuery(SearchRequest{Query: "zelda", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := service.start(t.Context(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(service.Stop)
+	select {
+	case <-source.started:
+	case <-time.After(time.Second):
+		t.Fatal("search refresh did not start")
+	}
+	service.Stop()
+	select {
+	case <-call.done:
+	case <-time.After(time.Second):
+		t.Fatal("search refresh did not stop")
+	}
+	service.Wait()
+	if !errors.Is(call.err, context.Canceled) {
+		t.Fatalf("refresh error: %v", call.err)
+	}
+	if _, err := service.start(t.Context(), query); !errors.Is(err, context.Canceled) {
+		t.Fatalf("refresh started after Stop: %v", err)
+	}
+	service.Stop()
+}

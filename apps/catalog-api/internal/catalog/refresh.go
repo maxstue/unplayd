@@ -106,73 +106,90 @@ func (s *Store) RunRefresh(ctx context.Context, importer *Importer, p RefreshPol
 			return nil
 		}
 		if time.Now().After(nextCleanup) {
-			cleanupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			count, err := s.cleanupSearches(cleanupCtx)
-			cancel()
-			if err != nil {
-				logger.Warn("search cache cleanup failed")
-				nextCleanup = time.Now().Add(time.Minute)
-			} else {
-				logger.Info("search cache cleanup", "removed", count)
-				nextCleanup = time.Now().Add(24 * time.Hour)
-			}
-			s.logRefreshStats(ctx, logger)
+			nextCleanup = s.maintainRefresh(ctx, logger)
 		}
 		delay := p.Poll
 		if importer != nil {
-			j, err := s.claimRefresh(ctx, p)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				logger.Warn("refresh claim failed")
-			}
-			if err == nil {
-				started := time.Now()
-				jobCtx, cancel := context.WithTimeout(ctx, p.Timeout)
-				games, fetchErr := importer.fetchRefresh(jobCtx, j, p.MaxAttempts)
-				cancel()
-				code := ""
-				terminal := false
-				next := jitter(p.Interval)
-				if fetchErr != nil {
-					games = nil
-					code = "provider_unavailable"
-					terminal = j.Attempts >= p.MaxAttempts
-					next = jitter(min(p.Retry*time.Duration(1<<min(j.Attempts-1, 10)), time.Hour))
-					if errors.Is(fetchErr, ErrNotFound) {
-						code = "provider_missing"
-						terminal = true
-					}
-					if rejected != nil && rejected(fetchErr) {
-						code = "provider_rejected"
-						terminal = true
-					}
-					if credentials != nil && credentials(fetchErr) {
-						code = "provider_credentials"
-						terminal = false
-						delay = time.Minute
-						next = time.Minute
-					}
-					if ctx.Err() != nil {
-						code = "shutdown"
-						terminal = false
-						next = 0
-					}
-				}
-				// Completion has its own bounded context so shutdown can relinquish ownership.
-				finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-				err = s.finishRefresh(finishCtx, j, games, next, code, terminal)
-				finishCancel()
-				if err != nil {
-					logger.Warn("refresh completion failed", "gameId", j.ID, "leaseLost", errors.Is(err, errLeaseLost))
-				} else {
-					logger.Info("catalog refresh", "gameId", j.ID, "attempt", j.Attempts, "result", code, "failed", terminal, "duration", time.Since(started), "nextRunAt", time.Now().Add(next), "claimId", j.Token)
-				}
-				if delay == p.Poll {
-					delay = 0
-				}
-			}
+			delay = s.runNextRefresh(ctx, importer, p, rejected, credentials, logger)
 		}
+
 		timer.Reset(delay)
 	}
+}
+
+// maintainRefresh schedules cleanup retries separately from provider work.
+func (s *Store) maintainRefresh(ctx context.Context, logger *slog.Logger) time.Time {
+	cleanupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	count, err := s.cleanupSearches(cleanupCtx)
+	cancel()
+	next := 24 * time.Hour
+	if err != nil {
+		logger.Warn("search cache cleanup failed")
+		next = time.Minute
+	} else {
+		logger.Info("search cache cleanup", "removed", count)
+	}
+	s.logRefreshStats(ctx, logger)
+	return time.Now().Add(next)
+}
+
+type refreshOutcome struct {
+	code        string
+	terminal    bool
+	next, pause time.Duration
+}
+
+func (p RefreshPolicy) outcome(ctx context.Context, j refreshJob, err error, rejected, credentials func(error) bool) refreshOutcome {
+	if err == nil {
+		return refreshOutcome{next: jitter(p.Interval)}
+	}
+	result := refreshOutcome{code: "provider_unavailable", terminal: j.Attempts >= p.MaxAttempts,
+		next: jitter(min(p.Retry*time.Duration(1<<min(j.Attempts-1, 10)), time.Hour))}
+	if errors.Is(err, ErrNotFound) {
+		result.code = "provider_missing"
+		result.terminal = true
+	}
+	if rejected != nil && rejected(err) {
+		result.code = "provider_rejected"
+		result.terminal = true
+	}
+	if credentials != nil && credentials(err) {
+		result = refreshOutcome{code: "provider_credentials", next: time.Minute, pause: time.Minute}
+	}
+	if ctx.Err() != nil {
+		result.code = "shutdown"
+		result.terminal = false
+		result.next = 0
+	}
+	return result
+}
+
+func (s *Store) runNextRefresh(ctx context.Context, importer *Importer, p RefreshPolicy, rejected, credentials func(error) bool, logger *slog.Logger) time.Duration {
+	j, err := s.claimRefresh(ctx, p)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			logger.Warn("refresh claim failed")
+		}
+		return p.Poll
+	}
+	started := time.Now()
+	jobCtx, cancel := context.WithTimeout(ctx, p.Timeout)
+	games, fetchErr := importer.fetchRefresh(jobCtx, j, p.MaxAttempts)
+	cancel()
+	outcome := p.outcome(ctx, j, fetchErr, rejected, credentials)
+	if fetchErr != nil {
+		games = nil
+	}
+	// Completion has its own bounded context so shutdown can relinquish ownership.
+	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	err = s.finishRefresh(finishCtx, j, games, outcome.next, outcome.code, outcome.terminal)
+	finishCancel()
+	if err != nil {
+		logger.Warn("refresh completion failed", "gameId", j.ID, "leaseLost", errors.Is(err, errLeaseLost))
+	} else {
+		logger.Info("catalog refresh", "gameId", j.ID, "attempt", j.Attempts, "result", outcome.code, "failed", outcome.terminal, "duration", time.Since(started), "nextRunAt", time.Now().Add(outcome.next), "claimId", j.Token)
+	}
+	return outcome.pause
 }
 
 // fetchRefresh performs no writes: only the current lease owner may commit results.

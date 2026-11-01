@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -64,6 +65,16 @@ func main() {
 		importer = catalog.NewImporter(client, store)
 	}
 	games := catalog.NewService(store, importer, catalog.DefaultSearchPolicy(), slog.Default())
+	games.SetLifecycle(ctx)
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		if err := store.RunRefresh(ctx, importer, catalog.DefaultRefreshPolicy(),
+			func(err error) bool { return errors.Is(err, igdb.ErrRejected) },
+			func(err error) bool { return errors.Is(err, igdb.ErrCredentials) }, slog.Default()); err != nil {
+			slog.Error("refresh worker failed", "error", err)
+		}
+	}()
 	server := &http.Server{
 		Addr: ":" + port, Handler: httpapi.NewHandler(authConfig.Token(), games, slog.Default()),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
@@ -73,6 +84,7 @@ func main() {
 	go func() {
 		defer close(shutdownDone)
 		<-ctx.Done()
+		games.Stop()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdown); err != nil {
@@ -86,4 +98,5 @@ func main() {
 	}
 	<-shutdownDone
 	games.Wait()
+	<-workerDone
 }

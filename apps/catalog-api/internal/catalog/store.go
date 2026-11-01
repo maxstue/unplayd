@@ -47,6 +47,16 @@ func (s *Store) Upsert(ctx context.Context, games []SourceGame) ([]Game, error) 
 		return nil, err
 	}
 	defer tx.Rollback()
+	stored, err := upsertGames(ctx, tx, games)
+	if err != nil {
+		return nil, err
+	}
+	return stored, tx.Commit()
+}
+
+// upsertGames requires identities to be locked in the common global order.
+func upsertGames(ctx context.Context, tx *sql.Tx, games []SourceGame) ([]Game, error) {
+	var err error
 	if err := lockIdentities(ctx, tx, games); err != nil {
 		return nil, err
 	}
@@ -80,7 +90,7 @@ func (s *Store) Upsert(ctx context.Context, games []SourceGame) ([]Game, error) 
 	if err != nil {
 		return nil, err
 	}
-	return stored, tx.Commit()
+	return stored, nil
 }
 
 func normalize(games []SourceGame) ([]SourceGame, error) {
@@ -187,6 +197,11 @@ func upsertGame(ctx context.Context, tx *sql.Tx, game SourceGame, platformIDs []
 		if _, err := tx.ExecContext(ctx, `INSERT INTO catalog.external_game_ids(source, external_id, game_id)
 			VALUES ($1, $2, $3)`, game.Source, game.ExternalID, id); err != nil {
 			return "", err
+		}
+		if game.Source == "igdb" {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO catalog.refresh_jobs(game_id, next_run_at) VALUES ($1, now() + interval '24 hours')`, id); err != nil {
+				return "", err
+			}
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO catalog.game_platforms(game_id, platform_id)
 			SELECT $1, unnest($2::uuid[])`, id, pq.Array(platformIDs))

@@ -48,6 +48,8 @@ type Service struct {
 	inflight      map[string]*refreshCall
 	coolingUntil  time.Time
 	refreshesDone sync.WaitGroup
+	lifecycle     context.Context
+	stopping      bool
 }
 
 type refreshCall struct {
@@ -109,6 +111,12 @@ func (s *Service) Batch(ctx context.Context, ids []string) (Batch, error) {
 	return s.store.Batch(ctx, ids)
 }
 
+// SetLifecycle binds background refreshes to the process lifetime before serving requests.
+func (s *Service) SetLifecycle(ctx context.Context) { s.lifecycle = ctx }
+
+// Stop prevents new refreshes before waiting for outstanding work.
+func (s *Service) Stop() { s.mu.Lock(); s.stopping = true; s.mu.Unlock() }
+
 // Wait blocks until background refreshes have finished.
 func (s *Service) Wait() { s.refreshesDone.Wait() }
 
@@ -143,6 +151,9 @@ func (s *Service) refresh(ctx context.Context, query localQuery) (providerErr, e
 func (s *Service) start(ctx context.Context, query localQuery) (*refreshCall, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stopping {
+		return nil, context.Canceled
+	}
 	if call, ok := s.inflight[query.key]; ok {
 		return call, nil
 	}
@@ -156,6 +167,10 @@ func (s *Service) start(ctx context.Context, query localQuery) (*refreshCall, er
 		defer s.refreshesDone.Done()
 		refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.policy.RefreshTimeout)
 		defer cancel()
+		if s.lifecycle != nil {
+			stop := context.AfterFunc(s.lifecycle, cancel)
+			defer stop()
+		}
 		call.err = s.fetch(refreshCtx, query)
 		s.mu.Lock()
 		delete(s.inflight, query.key)

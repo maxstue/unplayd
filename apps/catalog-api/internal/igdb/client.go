@@ -40,7 +40,8 @@ var (
 	// ErrUnavailable marks transient IGDB failures that persisted through all retries.
 	ErrUnavailable = errors.New("igdb unavailable")
 	// ErrRejected marks requests IGDB refused permanently, including rejected credentials.
-	ErrRejected = errors.New("igdb rejected the request")
+	ErrRejected    = errors.New("igdb rejected the request")
+	ErrCredentials = fmt.Errorf("%w: credentials rejected", ErrRejected)
 
 	imageIDPattern = regexp.MustCompile(`^[a-z0-9]{1,64}$`)
 
@@ -263,7 +264,7 @@ func (c *Client) post(ctx context.Context, endpoint, query string) ([]byte, erro
 		}
 		switch {
 		case errors.Is(err, ErrRejected):
-			return nil, err
+			return nil, ErrCredentials
 		case err == nil && status == http.StatusOK:
 			return body, nil
 		case err == nil && status == http.StatusUnauthorized && !renewed:
@@ -271,6 +272,8 @@ func (c *Client) post(ctx context.Context, endpoint, query string) ([]byte, erro
 			renewed = true
 			attempt--
 			continue
+		case err == nil && (status == http.StatusUnauthorized || status == http.StatusForbidden):
+			return nil, ErrCredentials
 		case err == nil && status != http.StatusTooManyRequests && status < http.StatusInternalServerError:
 			return nil, fmt.Errorf("%w: status %d", ErrRejected, status)
 		}

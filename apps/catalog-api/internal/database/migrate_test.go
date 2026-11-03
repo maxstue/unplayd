@@ -153,7 +153,7 @@ func assertSQLTrue(t *testing.T, db *sql.DB, query string, args ...any) {
 
 func TestMigrateUpgradesAndRepeatsWithoutChangingCatalogIdentity(t *testing.T) {
 	fixture := newPostgresFixture(t)
-	v1, latest := uint(1), uint(6)
+	v1, latest := uint(1), uint(7)
 	applyMigrations(t, fixture.config, &v1)
 	var gameID string
 	var createdAt, updatedAt time.Time
@@ -175,14 +175,14 @@ func TestMigrateUpgradesAndRepeatsWithoutChangingCatalogIdentity(t *testing.T) {
 			AND created_at = $2 AND updated_at = $3 FROM catalog.games WHERE id = $1`, gameID, createdAt, updatedAt)
 		assertSQLTrue(t, fixture.db, `SELECT count(*) = 1 AND bool_and(game_id = $1::uuid)
 			FROM catalog.external_game_ids WHERE source = 'igdb' AND external_id = '42'`, gameID)
-		assertSQLTrue(t, fixture.db, `SELECT version = 6 AND NOT dirty FROM catalog.schema_migrations`)
+		assertSQLTrue(t, fixture.db, `SELECT version = 7 AND NOT dirty FROM catalog.schema_migrations`)
 	})
 	t.Run("downgrade is refused without changing version or data", func(t *testing.T) {
 		err := Migrate(t.Context(), fixture.config, &v1)
-		if err == nil || !strings.Contains(err.Error(), "refusing downgrade from version 6") {
+		if err == nil || !strings.Contains(err.Error(), "refusing downgrade from version 7") {
 			t.Fatalf("expected forward-only migration error, got %v", err)
 		}
-		assertSQLTrue(t, fixture.db, `SELECT version = 6 AND NOT dirty FROM catalog.schema_migrations`)
+		assertSQLTrue(t, fixture.db, `SELECT version = 7 AND NOT dirty FROM catalog.schema_migrations`)
 		assertSQLTrue(t, fixture.db, `SELECT count(*) = 1 FROM catalog.external_game_ids WHERE game_id = $1`, gameID)
 	})
 }
@@ -445,4 +445,20 @@ func TestCatalogRoleIsIsolatedBySharedPostgresBootstrap(t *testing.T) {
 			t.Fatalf("expected redacted connection failure, got %v", err)
 		}
 	})
+}
+
+func TestRefreshMigrationBackfillsOnlyActiveIGDBGames(t *testing.T) {
+	fixture := newPostgresFixture(t)
+	v6 := uint(6)
+	applyMigrations(t, fixture.config, &v6)
+	active := insertGame(t, fixture.db, "Active")
+	inactive := insertGame(t, fixture.db, "Inactive")
+	other := insertGame(t, fixture.db, "Other")
+	executeSQL(t, fixture.db, `INSERT INTO catalog.external_game_ids(source,external_id,game_id) VALUES ('igdb','1',$1),('igdb','2',$2),('steam','3',$3)`, active, inactive, other)
+	executeSQL(t, fixture.db, `UPDATE catalog.games SET is_active=false WHERE id=$1`, inactive)
+	applyMigrations(t, fixture.config, nil)
+	assertSQLTrue(t, fixture.db, `SELECT count(*)=1 AND bool_and(game_id=$1::uuid AND state='pending' AND attempts=0 AND next_run_at>=now() AND next_run_at<=now()+interval '24 hours') FROM catalog.refresh_jobs`, active)
+	applyMigrations(t, fixture.config, nil)
+	assertSQLTrue(t, fixture.db, `SELECT count(*)=1 FROM catalog.refresh_jobs`)
+	assertPostgresError(t, fixture.db, "23514", `UPDATE catalog.refresh_jobs SET state='running'`)
 }

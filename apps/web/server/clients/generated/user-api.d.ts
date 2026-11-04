@@ -28,7 +28,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the authenticated user library */
+        /**
+         * List the authenticated user library
+         * @description Keyset pagination ordered by creation time and entry UUID descending. Cursors are opaque and bound to the status, ownership and platform filters; use the same filters on subsequent pages. Snapshots are stored fallbacks from insertion, not a live catalog copy.
+         */
         get: operations["listLibrary"];
         put?: never;
         /**
@@ -53,7 +56,10 @@ export interface paths {
         get: operations["getLibraryEntry"];
         put?: never;
         post?: never;
-        /** Remove an own entry and its personal dependent records */
+        /**
+         * Remove an own entry and its personal dependent records
+         * @description Atomically deletes the own library entry and cascades its status, favorite, rating and note. Returns 204 even when absent. Other users and the catalog are unaffected.
+         */
         delete: operations["deleteLibraryEntry"];
         options?: never;
         head?: never;
@@ -68,7 +74,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Explicitly change play status */
+        /**
+         * Explicitly change play status
+         * @description Changes only the separate play status and entry update timestamp in one transaction. Repeating the same status does not change timestamps. Ownership, platform, favorites, ratings, notes and snapshots are preserved. An absent own entry returns 404.
+         */
         put: operations["setPlayStatus"];
         post?: never;
         delete?: never;

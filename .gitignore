@@ -12,6 +12,7 @@ coverage/
 .sonar/
 .vite/
 .vite-cache/
+.vitest/
 *.log
 coverage.out
 /apps/catalog-api/catalog-api

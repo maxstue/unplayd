@@ -3,7 +3,7 @@
   "info": {
     "title": "Unplayd user-api",
     "version": "0.1.0",
-    "description": "Phase 1 contract. Business endpoints are implemented in subsequent tickets; this file does not claim they are available."
+    "description": "Library CRUD and separate play status are implemented. Favorites, ratings, notes and next-game endpoints are contracts for subsequent tickets."
   },
   "paths": {
     "/health/live": {
@@ -57,6 +57,7 @@
       "get": {
         "operationId": "listLibrary",
         "summary": "List the authenticated user library",
+        "description": "Keyset pagination ordered by creation time and entry UUID descending. Cursors are opaque and bound to the status, ownership and platform filters; use the same filters on subsequent pages. Snapshots are stored fallbacks from insertion, not a live catalog copy.",
         "parameters": [
           {
             "$ref": "./common.json#/components/parameters/RequestId"
@@ -273,6 +274,7 @@
       "delete": {
         "operationId": "deleteLibraryEntry",
         "summary": "Remove an own entry and its personal dependent records",
+        "description": "Atomically deletes the own library entry and cascades its status, favorite, rating and note. Returns 204 even when absent. Other users and the catalog are unaffected.",
         "parameters": [
           {
             "$ref": "./common.json#/components/parameters/RequestId"
@@ -321,6 +323,7 @@
       "put": {
         "operationId": "setPlayStatus",
         "summary": "Explicitly change play status",
+        "description": "Changes only the separate play status and entry update timestamp in one transaction. Repeating the same status does not change timestamps. Ownership, platform, favorites, ratings, notes and snapshots are preserved. An absent own entry returns 404.",
         "parameters": [
           {
             "$ref": "./common.json#/components/parameters/RequestId"

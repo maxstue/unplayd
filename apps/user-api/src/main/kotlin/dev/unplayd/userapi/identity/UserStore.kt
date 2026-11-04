@@ -1,11 +1,12 @@
 package dev.unplayd.userapi.identity
 
 import dev.unplayd.userapi.database.DatabaseConfig
+import dev.unplayd.userapi.library.ENTRY_SELECT
+import dev.unplayd.userapi.library.entry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import java.sql.DriverManager
-import java.sql.ResultSet
 import java.util.UUID
 
 data class LocalUser(
@@ -76,15 +77,7 @@ class JdbcUserStore(
             connection { db ->
                 db
                     .prepareStatement(
-                        """
-                        SELECT e.*, s.status, (f.library_entry_id IS NOT NULL) AS favorite, r.value AS rating, n.text AS note
-                        FROM user_data.library_entries e
-                        JOIN user_data.game_statuses s ON s.library_entry_id=e.id
-                        LEFT JOIN user_data.favorites f ON f.library_entry_id=e.id
-                        LEFT JOIN user_data.ratings r ON r.library_entry_id=e.id
-                        LEFT JOIN user_data.notes n ON n.library_entry_id=e.id
-                        WHERE e.user_id=? AND e.game_id=?
-                        """.trimIndent(),
+                        "$ENTRY_SELECT WHERE e.user_id=? AND e.game_id=?",
                     ).use { query ->
                         query.setObject(1, userId)
                         query.setObject(2, gameId)
@@ -95,19 +88,4 @@ class JdbcUserStore(
 
     private fun <T> connection(block: (java.sql.Connection) -> T): T =
         DriverManager.getConnection(config.url, config.user, config.password).use(block)
-
-    private fun ResultSet.entry() =
-        LibraryEntry(
-            id = getString("id"),
-            gameId = getString("game_id"),
-            platformId = getString("platform_id"),
-            ownership = getString("ownership"),
-            status = getString("status"),
-            favorite = getBoolean("favorite"),
-            rating = getObject("rating") as Int?,
-            note = getString("note"),
-            snapshot = GameSnapshot(getString("snapshot_title"), getString("snapshot_cover_url")),
-            createdAt = getTimestamp("created_at").toInstant().toString(),
-            updatedAt = getTimestamp("updated_at").toInstant().toString(),
-        )
 }

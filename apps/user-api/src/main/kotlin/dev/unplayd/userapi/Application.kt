@@ -2,11 +2,18 @@ package dev.unplayd.userapi
 
 import com.auth0.jwt.interfaces.JWTVerifier
 import dev.unplayd.userapi.auth.AuthConfig
+import dev.unplayd.userapi.catalog.CatalogConfig
+import dev.unplayd.userapi.catalog.HttpCatalogClient
 import dev.unplayd.userapi.database.DatabaseConfig
 import dev.unplayd.userapi.database.migrateDatabase
 import dev.unplayd.userapi.identity.JdbcUserStore
 import dev.unplayd.userapi.identity.MeResponse
 import dev.unplayd.userapi.identity.UserStore
+import dev.unplayd.userapi.library.JdbcLibraryStore
+import dev.unplayd.userapi.library.LibraryProblem
+import dev.unplayd.userapi.library.LibraryService
+import dev.unplayd.userapi.library.libraryRoutes
+import dev.unplayd.userapi.library.uuid
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.auth.HttpAuthHeader
@@ -23,6 +30,8 @@ import io.ktor.server.auth.jwt.jwt
 import io.ktor.server.auth.principal
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import io.ktor.server.plugins.BadRequestException
+import io.ktor.server.plugins.UnsupportedMediaTypeException
 import io.ktor.server.plugins.callid.CallId
 import io.ktor.server.plugins.callid.callId
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
@@ -45,8 +54,10 @@ fun main(args: Array<String>) {
     require(args.isEmpty()) { "Usage: user-api [migrate [targetVersion]]" }
     val port = System.getenv("PORT")?.let { requireNotNull(it.toIntOrNull()) { "PORT must be an integer" } } ?: 8445
     require(port in 1..65535) { "PORT must be between 1 and 65535" }
+    val users = JdbcUserStore(database)
+    val library = LibraryService(JdbcLibraryStore(database), users, HttpCatalogClient(CatalogConfig.load()))
     embeddedServer(Netty, host = "0.0.0.0", port = port) {
-        module(users = JdbcUserStore(database))
+        module(users = users, library = library)
     }.start(wait = true)
 }
 
@@ -72,6 +83,7 @@ private fun errorResponse(
             400 -> "invalid_request"
             401 -> "unauthorized"
             404 -> "not_found"
+            409 -> "conflict"
             else -> "unavailable"
         },
         message,
@@ -83,6 +95,7 @@ fun Application.module(
     auth: AuthConfig = AuthConfig.load(),
     users: UserStore = JdbcUserStore(DatabaseConfig.load()),
     verifier: JWTVerifier = auth.verifier(),
+    library: LibraryService? = null,
 ) {
     install(ContentNegotiation) { json() }
     install(CallId) {
@@ -95,6 +108,15 @@ fun Application.module(
         call.response.header(HttpHeaders.CacheControl, "no-store")
     }
     install(StatusPages) {
+        exception<LibraryProblem> { call, cause ->
+            call.respond(HttpStatusCode.fromValue(cause.status), errorResponse(cause.message, cause.status, call.callId))
+        }
+        exception<BadRequestException> { call, _ ->
+            call.respond(HttpStatusCode.BadRequest, errorResponse("Invalid request", 400, call.callId))
+        }
+        exception<UnsupportedMediaTypeException> { call, _ ->
+            call.respond(HttpStatusCode.BadRequest, errorResponse("Expected application/json", 400, call.callId))
+        }
         exception<Throwable> { call, cause ->
             if (cause is kotlinx.coroutines.CancellationException) throw cause
             this@module.log.error("User API request failed: {} (requestId={})", cause::class.simpleName, call.callId)
@@ -134,19 +156,13 @@ fun Application.module(
     routing {
         get("/health/live") { call.respond(mapOf("status" to "ok", "service" to "user-api")) }
         authenticate("clerk") {
+            libraryRoutes(users, library)
             get("/me") {
                 val user = users.resolve(requireNotNull(call.principal<JWTPrincipal>()).subject!!)
                 call.respond(MeResponse(user.id.toString(), user.clerkSubject))
             }
             get("/library/{gameId}") {
-                val gameId = runCatching { UUID.fromString(call.parameters["gameId"]) }.getOrNull()
-                if (gameId == null) {
-                    call.respond(
-                        HttpStatusCode.BadRequest,
-                        errorResponse(message = "Invalid game ID", status = 400, requestId = call.callId),
-                    )
-                    return@get
-                }
+                val gameId = uuid(call.parameters["gameId"])
                 val user = users.resolve(requireNotNull(call.principal<JWTPrincipal>()).subject!!)
                 val entry = users.findEntry(user.id, gameId)
                 if (entry ==

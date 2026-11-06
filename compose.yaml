@@ -28,6 +28,8 @@ services:
       DATABASE_PASSWORD: ${USER_API_DB_PASSWORD:?Set USER_API_DB_PASSWORD via Infisical or environment}
       CLERK_ISSUER: ${CLERK_ISSUER:?Set CLERK_ISSUER via Infisical or environment}
       CLERK_AUTHORIZED_PARTY: ${CLERK_AUTHORIZED_PARTY:-http://localhost:8444}
+      CATALOG_API_URL: http://catalog-api:8446
+      CATALOG_SERVICE_TOKEN: ${CATALOG_SERVICE_TOKEN:?Set CATALOG_SERVICE_TOKEN via Infisical or environment}
     ports:
       - "127.0.0.1:8445:8445"
     depends_on:

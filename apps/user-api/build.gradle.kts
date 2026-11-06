@@ -3,7 +3,7 @@ plugins {
     kotlin("plugin.serialization") version "2.4.21"
     application
     jacoco
-    id("org.jlleitschuh.gradle.ktlint") version "14.0.1"
+    id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
 }
 
 group = "dev.unplayd"
@@ -15,7 +15,7 @@ application { mainClass.set("dev.unplayd.userapi.ApplicationKt") }
 dependencyLocking { lockAllConfigurations() }
 sourceSets.test { resources.srcDir(projectDir.resolve("../../infra/postgres").canonicalFile) }
 
-val ktorVersion = "3.6.0"
+val ktorVersion = "3.6.1"
 dependencies {
     implementation(platform("io.ktor:ktor-bom:$ktorVersion"))
     implementation("io.ktor:ktor-server-netty")
@@ -24,9 +24,9 @@ dependencies {
     implementation("io.ktor:ktor-server-auth-jwt")
     implementation("io.ktor:ktor-server-status-pages")
     implementation("io.ktor:ktor-server-call-id")
-    implementation("ch.qos.logback:logback-classic:1.6.5")
-    implementation("org.flywaydb:flyway-core:13.10.3")
-    implementation("org.flywaydb:flyway-database-postgresql:13.10.3")
+    implementation("ch.qos.logback:logback-classic:1.6.6")
+    implementation("org.flywaydb:flyway-core:13.12.0")
+    implementation("org.flywaydb:flyway-database-postgresql:13.12.0")
     implementation("org.postgresql:postgresql:42.7.14")
     testImplementation("io.ktor:ktor-server-test-host")
     testImplementation(kotlin("test-junit5"))

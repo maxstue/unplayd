@@ -4,6 +4,7 @@ export interface ServiceClientOptions {
   requestId: string;
   timeoutMs?: number;
   fetch?: typeof globalThis.fetch;
+  signal?: AbortSignal;
 }
 
 export function serviceTransport(options: ServiceClientOptions) {
@@ -14,7 +15,13 @@ export function serviceTransport(options: ServiceClientOptions) {
   } catch {
     throw new Error("Service base URL must be an absolute HTTP(S) URL.");
   }
-  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
     throw new Error("Service base URL must use HTTP(S) and contain no credentials.");
   }
   if (!options.token) throw new Error("Service authentication token is required.");
@@ -28,7 +35,12 @@ export function serviceTransport(options: ServiceClientOptions) {
     headers: { Authorization: `Bearer ${options.token}`, "X-Request-ID": options.requestId },
     fetch: (request: Request) =>
       fetcher(request, {
-        signal: AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]),
+        redirect: "error",
+        signal: AbortSignal.any([
+          request.signal,
+          AbortSignal.timeout(timeoutMs),
+          ...(options.signal ? [options.signal] : []),
+        ]),
       }),
   };
 }

@@ -16,6 +16,7 @@ export default defineNuxtConfig({
     userApiUrl: "http://localhost:8445",
     catalogApiUrl: "http://localhost:8446",
     catalogServiceToken: "",
+    serviceTimeoutMs: 3_000,
   },
   routeRules: {
     "/": { headers: { "Cache-Control": "no-store" } },

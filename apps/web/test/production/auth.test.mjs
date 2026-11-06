@@ -85,7 +85,18 @@ function excludesSecrets(text) {
 }
 
 test("built app keeps public HTML, redirects and API errors free of private runtime credentials", async () => {
-  for (const path of ["/", "/sign-in", "/sign-up", "/dashboard", "/api/health", "/api/me"]) {
+  for (const path of [
+    "/",
+    "/sign-in",
+    "/sign-up",
+    "/dashboard",
+    "/api/health",
+    "/api/me",
+    "/api/library",
+    "/api/games?query=Zelda",
+    "/api/library/invalid",
+    "/api/games/invalid",
+  ]) {
     const response = await fetch(`${baseUrl}${path}`, {
       redirect: "manual",
       signal: AbortSignal.timeout(5_000),
@@ -96,7 +107,8 @@ test("built app keeps public HTML, redirects and API errors free of private runt
     if (path === "/dashboard") {
       assert.equal(response.status, 302);
       assert.equal(new URL(response.headers.get("location"), baseUrl).pathname, "/sign-in");
-    } else if (path === "/api/me") assert.equal(response.status, 401);
+    } else if (path.startsWith("/api/") && path !== "/api/health")
+      assert.equal(response.status, 401);
     else assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "no-store");
     assert.doesNotMatch(text, /"secretKey"\s*:/);

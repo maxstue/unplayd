@@ -3,7 +3,7 @@ const messages = new Map<string, string>([
   ["form_identifier_not_found", "Anmeldung nicht möglich. Prüfe E-Mail-Adresse und Passwort."],
   [
     "form_identifier_exists",
-    "Das Konto kann nicht erstellt werden. Versuche dich anzumelden oder dein Passwort zurückzusetzen.",
+    "Für diese E-Mail-Adresse besteht bereits ein Konto. Melde dich an oder nutze „Passwort vergessen?“ auf der Anmeldeseite.",
   ],
   ["form_code_incorrect", "Der Code stimmt nicht. Bitte prüfe ihn und versuche es erneut."],
   ["verification_expired", "Der Code ist abgelaufen. Fordere einen neuen an."],

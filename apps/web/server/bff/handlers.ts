@@ -9,6 +9,7 @@ import {
   gameId,
   libraryQuery,
   statusBody,
+  suggestionQuery,
 } from "./validation";
 
 export function searchGames(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
@@ -33,6 +34,23 @@ export function getGame(event: H3Event, config: ServicesConfig, fetcher?: typeof
       return (
         await upstream(
           () => s.catalog.GET("/games/{gameId}", { params: { path: { gameId: id } } }),
+          "catalog",
+          s.requestId,
+        )
+      ).data;
+    },
+    fetcher,
+  );
+}
+export function suggestGames(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
+  return withServices(
+    event,
+    config,
+    async (s) => {
+      const query = suggestionQuery(event);
+      return (
+        await upstream(
+          () => s.catalog.GET("/games/suggestions", { params: { query } }),
           "catalog",
           s.requestId,
         )

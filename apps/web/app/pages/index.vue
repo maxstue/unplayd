@@ -2,23 +2,34 @@
 const route = useRoute();
 const router = useRouter();
 const { isSignedIn, isLoaded } = useAuth();
-const query = computed({
-  get: () => (typeof route.query.query === "string" ? route.query.query : ""),
-  set: (value: string) => {
-    void router.replace({ query: { ...route.query, query: value || undefined } });
-  },
-});
+const query = computed(() => (typeof route.query.query === "string" ? route.query.query : ""));
 const enabled = computed(() => Boolean(isLoaded.value && isSignedIn.value));
+const mounted = ref(false);
+onMounted(() => {
+  mounted.value = true;
+});
+const searchEnabled = computed(() => mounted.value && enabled.value);
 const { items, status, nextCursor, loadingMore, moreError, retry, loadMore } = useGameSearch(
   query,
-  enabled,
+  searchEnabled,
   (term, cursor, signal) =>
     $fetch("/api/games", {
       query: { query: term, limit: 24, ...(cursor ? { cursor } : {}) },
       signal,
       retry: 0,
     }),
+  0,
 );
+async function submitSearch(term: string) {
+  if (term === query.value) {
+    await retry();
+    return;
+  }
+  await router.push({ path: "/", query: { ...route.query, query: term } });
+}
+async function openSuggestion(game: { id: string }, term: string) {
+  await navigateTo({ path: `/games/${game.id}`, query: { query: term } });
+}
 const knownEntries = useState<Record<string, boolean>>("known-library-entries", () => ({}));
 useHead({ title: "Spiele entdecken · Unplayd" });
 </script>
@@ -30,52 +41,21 @@ useHead({ title: "Spiele entdecken · Unplayd" });
       <p>Entdecke Spiele und mach sie zu deiner Sammlung.</p>
     </div>
     <template v-if="enabled">
-      <form role="search" @submit.prevent="retry()">
-        <label for="game-search">Spiele suchen</label>
-        <div class="search-field">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            aria-hidden="true"
-          >
-            <circle cx="10.5" cy="10.5" r="7.5" />
-            <path d="m16 16 6 6" />
-          </svg>
-          <input
-            id="game-search"
-            v-model="query"
-            type="search"
-            name="query"
-            placeholder="Spielnamen eingeben …"
-            maxlength="200"
-            autocomplete="off"
-            aria-describedby="search-hint"
-          />
-          <button v-if="query" type="button" aria-label="Suche leeren" @click="query = ''">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              aria-hidden="true"
-            >
-              <path d="m6 6 12 12M6 18 18 6" />
-            </svg>
-          </button>
-        </div>
-        <p id="search-hint" class="muted" :class="{ 'visually-hidden': query.trim().length >= 2 }">
-          Gib mindestens zwei Zeichen ein.
-        </p>
-      </form>
+      <GameSearchField
+        :query="query"
+        :enabled="enabled"
+        @search="submitSearch"
+        @select="openSuggestion"
+      />
       <section
         class="search-results"
         aria-labelledby="results-title"
         :aria-busy="status === 'loading' || loadingMore"
       >
         <div class="results-heading">
-          <h2 id="results-title">Suchergebnisse</h2>
+          <h2 id="results-title">
+            {{ query ? `Suchergebnisse für „${query}“` : "Suchergebnisse" }}
+          </h2>
           <output v-if="status === 'success'" class="muted">
             {{ items.length }} {{ items.length === 1 ? "Spiel" : "Spiele"
             }}{{ nextCursor ? " · weitere verfügbar" : "" }}

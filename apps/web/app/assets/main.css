@@ -603,3 +603,74 @@ output {
     margin-bottom: 2rem;
   }
 }
+.game-search-form {
+  position: relative;
+}
+.search-field input {
+  min-width: 0;
+}
+.search-field .search-submit svg {
+  color: var(--accent);
+}
+.search-suggestions {
+  max-height: min(22rem, 45dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  position: absolute;
+  inset: 5rem 0 auto;
+  z-index: 10;
+  margin: 0;
+  padding: 0.3rem;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  box-shadow: 0 12px 28px #0005;
+}
+.search-suggestions li {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-height: 60px;
+  padding: 0.5rem 0.7rem;
+  cursor: pointer;
+  border-radius: 0.25rem;
+}
+.search-suggestions li[aria-selected="true"],
+.search-suggestions li:hover {
+  background: var(--line);
+}
+.search-suggestions img,
+.suggestion-cover {
+  flex: none;
+  width: 32px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 0.15rem;
+}
+.suggestion-cover {
+  background: var(--line);
+}
+.suggestion-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.suggestion-text strong {
+  font-size: 0.875rem;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.suggestion-text > span,
+.suggestion-hint {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+.suggestion-hint {
+  margin-top: 0.5rem;
+}
+.results-heading h2 {
+  overflow-wrap: anywhere;
+}

@@ -156,3 +156,34 @@ describe("catalog search lifecycle", () => {
     expect(fetcher.mock.calls[0]![2].aborted).toBe(true);
   });
 });
+
+it("loads a committed search immediately while a separate draft only drives delayed suggestions", async () => {
+  const scope = effectScope();
+  scopes.push(scope);
+  const committed = ref("");
+  const draft = ref("");
+  const enabled = ref(true);
+  const fetchResults = vi
+    .fn<Parameters<typeof useGameSearch>[2]>()
+    .mockResolvedValue(page("result"));
+  const fetchSuggestions = vi
+    .fn<Parameters<typeof useGameSearch>[2]>()
+    .mockResolvedValue(page("suggestion"));
+  scope.run(() => {
+    useGameSearch(committed, enabled, fetchResults, 0);
+    useGameSearch(draft, enabled, fetchSuggestions, 500);
+  });
+  draft.value = "Hollow";
+  await vi.advanceTimersByTimeAsync(499);
+  expect(fetchResults).not.toHaveBeenCalled();
+  expect(fetchSuggestions).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(fetchSuggestions).toHaveBeenCalledTimes(1);
+  expect(fetchResults).not.toHaveBeenCalled();
+  committed.value = draft.value;
+  expect(fetchResults).toHaveBeenCalledWith("Hollow", null, expect.any(AbortSignal));
+  draft.value = "Hollow Knight";
+  await vi.advanceTimersByTimeAsync(500);
+  expect(fetchResults).toHaveBeenCalledTimes(1);
+  expect(fetchSuggestions).toHaveBeenCalledTimes(2);
+});

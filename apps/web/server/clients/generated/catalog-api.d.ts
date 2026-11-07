@@ -81,6 +81,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Suggest up to five games using cached IGDB search
+         * @description Autocomplete backed by the same IGDB search cache as full searches. New or stale queries refresh from IGDB; fresh queries are served locally for 24 hours. Returns up to five ranked active parent games, including parents of matching child games. Provider failures fall back to stored matches, or return unavailable when none exist. A successful provider search with no matches returns an empty list. No pagination is exposed; nextCursor is always null. Only query is accepted.
+         */
+        get: operations["suggestGames"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -434,6 +454,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GameBatchResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    suggestGames: {
+        parameters: {
+            query: {
+                query: string;
+            };
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Up to five ranked matches; nextCursor is null. */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GamePage"];
                 };
             };
             400: components["responses"]["BadRequest"];

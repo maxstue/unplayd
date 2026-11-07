@@ -7,7 +7,12 @@ type FetchPage = (
   signal: AbortSignal,
 ) => Promise<CatalogPage>;
 
-export function useGameSearch(query: Ref<string>, enabled: Ref<boolean>, fetchPage: FetchPage) {
+export function useGameSearch(
+  query: Ref<string>,
+  enabled: Ref<boolean>,
+  fetchPage: FetchPage,
+  debounceMs = 300,
+) {
   const items = shallowRef<SearchHit[]>([]);
   const nextCursor = ref<string | null>(null);
   const status = ref<"idle" | "loading" | "success" | "error">("idle");
@@ -59,7 +64,10 @@ export function useGameSearch(query: Ref<string>, enabled: Ref<boolean>, fetchPa
       loadingMore.value = false;
       const length = query.value.trim().length;
       status.value = enabled.value && length >= 2 && length <= 200 ? "loading" : "idle";
-      if (status.value === "loading") timer = setTimeout(() => void request(), 300);
+      if (status.value === "loading") {
+        if (debounceMs === 0) void request();
+        else timer = setTimeout(() => void request(), debounceMs);
+      }
     },
     { immediate: true, flush: "sync" },
   );

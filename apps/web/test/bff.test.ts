@@ -11,6 +11,7 @@ import {
 } from "h3";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import search from "../server/api/games/index.get";
+import suggestions from "../server/api/games/suggestions.get";
 import detail from "../server/api/games/[gameId].get";
 import batch from "../server/api/games/batch.post";
 import library from "../server/api/library/index.get";
@@ -68,6 +69,7 @@ function game(gameId: string) {
 function app() {
   const router = createRouter()
     .get("/api/games", search)
+    .get("/api/games/suggestions", suggestions)
     .get("/api/games/:gameId", detail)
     .post("/api/games/batch", batch)
     .get("/api/library", library)
@@ -457,4 +459,34 @@ it.each([
   { serviceTimeoutMs: 30001 },
 ])("rejects invalid service configuration without reflecting the value: %j", (invalid) => {
   expect(() => validateServicesConfig({ ...config, ...invalid })).toThrow(/NUXT_/);
+});
+
+it("suggests games through the catalog route without touching user data", async () => {
+  fetcher.mockResolvedValueOnce(Response.json({ items: [], nextCursor: null }));
+  const response = await send("/api/games/suggestions?query=Hollow");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ items: [], nextCursor: null });
+  expect(requests()).toHaveLength(1);
+  expect(requests()[0]?.url).toBe(config.catalogApiUrl + "/games/suggestions?query=Hollow");
+  expect(requests()[0]?.headers.get("Authorization")).toBe("Bearer " + config.catalogServiceToken);
+});
+
+it("rejects invalid and signed-out suggestion requests before calling the catalog", async () => {
+  for (const query of [
+    "",
+    "query=x",
+    "query=Hollow&query=Hades",
+    "query=Hollow&limit=50",
+    "query=" + "x".repeat(201),
+  ]) {
+    expect((await send("/api/games/suggestions?" + query)).status).toBe(400);
+  }
+  expect(
+    (
+      await send("/api/games/suggestions?query=Hollow", "GET", undefined, {
+        "x-test-session": "none",
+      })
+    ).status,
+  ).toBe(401);
+  expect(fetcher).not.toHaveBeenCalled();
 });

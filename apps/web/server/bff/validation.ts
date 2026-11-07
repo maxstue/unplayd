@@ -56,6 +56,11 @@ export function catalogQuery(event: H3Event) {
     kind,
   };
 }
+export function suggestionQuery(event: H3Event) {
+  const q = getQuery(event);
+  if (Object.keys(q).some((key) => key !== "query")) return invalid();
+  return { query: text(q.query, 2, 200) };
+}
 async function body(event: H3Event, fields: string[]) {
   if (getHeader(event, "content-type")?.split(";")[0] !== "application/json") return invalid();
   let data: unknown;

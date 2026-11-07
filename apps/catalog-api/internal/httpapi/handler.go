@@ -36,6 +36,7 @@ func NewHandler(serviceToken string, games Catalog, logger *slog.Logger) http.Ha
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "catalog-api"})
 	})
 	mux.HandleFunc("GET /games", api.search)
+	mux.HandleFunc("GET /games/suggestions", api.suggestions)
 	mux.HandleFunc("GET /games/{gameId}", api.detail)
 	mux.HandleFunc("POST /games/batch", api.batch)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

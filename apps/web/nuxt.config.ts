@@ -1,6 +1,7 @@
 export default defineNuxtConfig({
   compatibilityDate: "2026-10-15",
   telemetry: false,
+  css: ["~/assets/main.css"],
   app: { head: { title: "Unplayd", htmlAttrs: { lang: "de" } } },
   modules: ["@nuxt/eslint", "@clerk/nuxt"],
   clerk: {
@@ -21,6 +22,7 @@ export default defineNuxtConfig({
   routeRules: {
     "/": { headers: { "Cache-Control": "no-store" } },
     "/dashboard/**": { headers: { "Cache-Control": "no-store" } },
+    "/games/**": { headers: { "Cache-Control": "no-store" } },
     "/sign-in/**": { headers: { "Cache-Control": "no-store" } },
     "/sign-up/**": { headers: { "Cache-Control": "no-store" } },
     "/api/**": { headers: { "Cache-Control": "no-store" } },

@@ -1,5 +1,4 @@
-<template>
-  <section class="auth-page" aria-label="Konto erstellen">
-    <SignUp routing="hash" />
-  </section>
-</template>
+<script setup lang="ts">
+useHead({ title: "Konto erstellen · Unplayd" });
+</script>
+<template><AuthForm mode="sign-up" /></template>

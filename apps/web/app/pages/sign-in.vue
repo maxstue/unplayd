@@ -1,5 +1,4 @@
-<template>
-  <section class="auth-page" aria-label="Anmelden">
-    <SignIn routing="hash" />
-  </section>
-</template>
+<script setup lang="ts">
+useHead({ title: "Anmelden · Unplayd" });
+</script>
+<template><AuthForm mode="sign-in" /></template>

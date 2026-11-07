@@ -1,73 +1,45 @@
-<template>
-  <main>
-    <header>
-      <NuxtLink to="/" class="brand">Unplayd</NuxtLink>
-      <nav aria-label="Hauptnavigation">
-        <Show when="signed-in">
-          <NuxtLink to="/dashboard">Mein Konto</NuxtLink>
-          <UserButton />
-        </Show>
-        <Show when="signed-out">
-          <NuxtLink to="/sign-in">Anmelden</NuxtLink>
-        </Show>
-      </nav>
-    </header>
-    <h1>Deine Spiele. Dein Überblick.</h1>
-    <p>Dein persönlicher Game Tracker.</p>
-    <NuxtPage />
-  </main>
-</template>
+<script setup lang="ts">
+const { userId } = useAuth();
+const route = useRoute();
+const isAuthPage = computed(() => /^\/sign-(in|up)\/?$/.test(route.path));
+const knownEntries = useState<Record<string, boolean>>("known-library-entries", () => ({}));
+watch(userId, (current, previous) => {
+  if (previous && current !== previous) {
+    knownEntries.value = {};
+    clearNuxtData();
+    void navigateTo("/");
+  }
+});
+</script>
 
-<style>
-body {
-  margin: 0;
-  font-family: system-ui, sans-serif;
-  color: #1b2734;
-  background: #f8fafb;
-}
-main {
-  max-width: 64rem;
-  margin: 4rem auto;
-  padding: 0 1.5rem;
-}
-header,
-nav {
-  display: flex;
-  align-items: center;
-  gap: 1.5rem;
-}
-header {
-  justify-content: space-between;
-  margin-bottom: 3rem;
-}
-a {
-  color: #164e63;
-}
-.brand {
-  font-size: 1.5rem;
-  font-weight: 750;
-  text-decoration: none;
-}
-.auth-page {
-  display: flex;
-  justify-content: center;
-  padding: 1rem 0;
-}
-.account-id {
-  overflow-wrap: anywhere;
-  color: #526171;
-}
-button {
-  font: inherit;
-  padding: 0.6rem 1rem;
-  cursor: pointer;
-}
-@media (max-width: 480px) {
-  main {
-    margin-top: 1.5rem;
-  }
-  nav {
-    gap: 0.75rem;
-  }
-}
-</style>
+<template>
+  <div class="app-shell">
+    <a class="skip-link" href="#main-content">Zum Inhalt</a>
+    <header class="app-header">
+      <div class="header-content">
+        <NuxtLink to="/" class="brand">Unplayd<span aria-hidden="true">.</span></NuxtLink>
+        <nav aria-label="Hauptnavigation">
+          <NuxtLink
+            to="/"
+            :aria-current="
+              $route.path === '/' || $route.path.startsWith('/games/') ? 'page' : undefined
+            "
+            >Spiele entdecken</NuxtLink
+          >
+          <Show when="signed-in"><NuxtLink to="/dashboard">Mein Konto</NuxtLink></Show>
+        </nav>
+        <Show when="signed-out">
+          <NuxtLink v-if="!isAuthPage" to="/sign-in" class="button secondary">Anmelden</NuxtLink>
+        </Show>
+        <Show when="signed-in"><UserButton /></Show>
+      </div>
+    </header>
+    <main id="main-content" class="page-content" tabindex="-1"><NuxtPage /></main>
+    <footer class="app-footer">
+      <div>
+        Spieldaten von
+        <a href="https://www.igdb.com/" target="_blank" rel="noopener noreferrer">IGDB</a>
+      </div>
+    </footer>
+  </div>
+</template>

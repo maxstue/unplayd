@@ -20,6 +20,8 @@ export default withNuxt()
       },
     },
     rules: {
+      // Oxfmt emits self-closing void elements in Vue templates.
+      "vue/html-self-closing": ["error", { html: { void: "always" } }],
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/no-misused-promises": "error",
     },

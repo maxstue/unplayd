@@ -44,10 +44,9 @@ export function libraryQuery(event: H3Event) {
 }
 export function catalogQuery(event: H3Event) {
   const q = getQuery(event);
+  const requestedKinds = Array.isArray(q.kind) ? q.kind : [q.kind];
   const kind =
-    q.kind === undefined
-      ? undefined
-      : (Array.isArray(q.kind) ? q.kind : [q.kind]).map((value) => choice(value, kinds));
+    q.kind === undefined ? undefined : requestedKinds.map((value) => choice(value, kinds));
   if (kind && (kind.length > 8 || new Set(kind).size !== kind.length)) return invalid();
   return {
     query: text(q.query, 2, 200),

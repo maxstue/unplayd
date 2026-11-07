@@ -10,6 +10,7 @@ const focused = ref(false);
 const dismissed = ref(false);
 const active = ref(-1);
 const form = ref<HTMLFormElement>();
+const input = ref<HTMLInputElement>();
 const list = ref<HTMLElement>();
 const listId = "game-suggestions";
 const suggestionEnabled = computed(
@@ -31,9 +32,6 @@ const matches = computed(() => items.value.slice(0, 5).map((hit) => hit.game));
 const expanded = computed(
   () => suggestionEnabled.value && status.value === "success" && matches.value.length > 0,
 );
-const activeId = computed(() =>
-  expanded.value && active.value >= 0 ? `${listId}-${active.value}` : undefined,
-);
 const valid = computed(() => draft.value.trim().length >= 2 && draft.value.trim().length <= 200);
 watch(
   draft,
@@ -45,11 +43,6 @@ watch(
 );
 watch(items, () => {
   active.value = -1;
-});
-watch(active, async (index) => {
-  if (index < 0) return;
-  await nextTick();
-  list.value?.children.item(index)?.scrollIntoView({ block: "nearest" });
 });
 watch(
   () => props.query,
@@ -72,32 +65,25 @@ function choose(game: GameCardModel) {
   dismiss();
   emit("select", game, draft.value.trim());
 }
-function move(direction: number) {
+async function move(direction: number) {
   dismissed.value = false;
   if (!expanded.value) return;
   if (active.value < 0) active.value = direction > 0 ? 0 : matches.value.length - 1;
   else active.value = (active.value + direction + matches.value.length) % matches.value.length;
+  await nextTick();
+  list.value?.querySelectorAll("button").item(active.value)?.focus();
 }
 function keydown(event: KeyboardEvent) {
   if (event.isComposing) return;
   if (event.key === "Escape") {
     event.preventDefault();
-    dismiss();
-    return;
-  }
-  if (event.key === "Tab") {
+    input.value?.focus();
     dismiss();
     return;
   }
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     event.preventDefault();
-    move(event.key === "ArrowDown" ? 1 : -1);
-    return;
-  }
-  const selected = expanded.value ? matches.value[active.value] : undefined;
-  if (event.key === "Enter" && selected) {
-    event.preventDefault();
-    choose(selected);
+    void move(event.key === "ArrowDown" ? 1 : -1);
   }
 }
 function focusout(event: FocusEvent) {
@@ -117,14 +103,10 @@ function focusout(event: FocusEvent) {
     <div class="search-field">
       <input
         id="game-search"
+        ref="input"
         v-model="draft"
         type="search"
-        role="combobox"
-        aria-autocomplete="list"
-        aria-haspopup="listbox"
-        :aria-expanded="expanded"
         :aria-controls="expanded ? listId : undefined"
-        :aria-activedescendant="activeId"
         name="query"
         placeholder="Spielnamen eingeben …"
         minlength="2"
@@ -173,40 +155,30 @@ function focusout(event: FocusEvent) {
       v-if="expanded"
       :id="listId"
       ref="list"
-      role="listbox"
       aria-label="Spielvorschläge"
       class="search-suggestions"
     >
-      <li
-        v-for="(game, index) in matches"
-        :id="`${listId}-${index}`"
-        :key="game.id"
-        role="option"
-        :aria-selected="active === index"
-        tabindex="-1"
-        @mousedown.prevent
-        @click="choose(game)"
-        @keydown.enter.prevent="choose(game)"
-        @pointermove="active = index"
-      >
-        <img
-          v-if="game.coverUrl"
-          :src="game.coverUrl"
-          alt=""
-          width="32"
-          height="44"
-          referrerpolicy="no-referrer"
-        />
-        <span v-else class="suggestion-cover" aria-hidden="true" />
-        <span class="suggestion-text"
-          ><strong>{{ game.title }}</strong
-          ><span>{{
-            game.platforms
-              .slice(0, 2)
-              .map((platform) => platform.name)
-              .join(" · ")
-          }}</span></span
-        >
+      <li v-for="(game, index) in matches" :key="game.id">
+        <button type="button" @click="choose(game)" @focus="active = index" @keydown="keydown">
+          <img
+            v-if="game.coverUrl"
+            :src="game.coverUrl"
+            alt=""
+            width="32"
+            height="44"
+            referrerpolicy="no-referrer"
+          />
+          <span v-else class="suggestion-cover" aria-hidden="true" />
+          <span class="suggestion-text"
+            ><strong>{{ game.title }}</strong
+            ><span>{{
+              game.platforms
+                .slice(0, 2)
+                .map((platform) => platform.name)
+                .join(" · ")
+            }}</span></span
+          >
+        </button>
       </li>
     </ul>
     <p id="search-hint" class="muted">

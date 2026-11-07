@@ -205,6 +205,7 @@ select {
   color: var(--muted);
 }
 .search-field input {
+  min-width: 0;
   border: none;
   outline: none;
   background: transparent;
@@ -606,9 +607,6 @@ output {
 .game-search-form {
   position: relative;
 }
-.search-field input {
-  min-width: 0;
-}
 .search-field .search-submit svg {
   color: var(--accent);
 }
@@ -627,8 +625,13 @@ output {
   border-radius: 0.4rem;
   box-shadow: 0 12px 28px #0005;
 }
-.search-suggestions li {
+.search-suggestions button {
   display: flex;
+  width: 100%;
+  background: transparent;
+  color: inherit;
+  border: none;
+  text-align: left;
   align-items: center;
   gap: 0.8rem;
   min-height: 60px;
@@ -636,8 +639,8 @@ output {
   cursor: pointer;
   border-radius: 0.25rem;
 }
-.search-suggestions li[aria-selected="true"],
-.search-suggestions li:hover {
+.search-suggestions button:focus-visible,
+.search-suggestions button:hover {
   background: var(--line);
 }
 .search-suggestions img,

@@ -90,6 +90,21 @@ func (a api) search(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
+	a.searchPage(w, r, request, true)
+}
+
+// suggestions shares the provider search cache with full searches, but exposes
+// only the first five matches without pagination.
+func (a api) suggestions(w http.ResponseWriter, r *http.Request) {
+	values, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil || len(values) != 1 || len(values["query"]) != 1 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "Only a single query parameter is supported.")
+		return
+	}
+	a.searchPage(w, r, catalog.SearchRequest{Query: values.Get("query"), Limit: 5}, false)
+}
+
+func (a api) searchPage(w http.ResponseWriter, r *http.Request, request catalog.SearchRequest, includeCursor bool) {
 	page, err := a.games.Search(r.Context(), request)
 	if err != nil {
 		a.fail(w, r, err)
@@ -103,7 +118,7 @@ func (a api) search(w http.ResponseWriter, r *http.Request) {
 		}
 		body.Items[index] = searchHitDTO{Game: newGameDTO(hit.Game), ChildCounts: counts, MatchedChildren: newGameDTOs(hit.MatchedChildren)}
 	}
-	if page.NextCursor != "" {
+	if page.NextCursor != "" && includeCursor {
 		body.NextCursor = &page.NextCursor
 	}
 	writeJSON(w, http.StatusOK, body)

@@ -193,6 +193,7 @@ func (f *routeFixture) testProviderOutage(t *testing.T) {
 func (f *routeFixture) testAuthentication(t *testing.T) {
 	for _, route := range []struct{ method, target string }{
 		{http.MethodGet, "/games?query=witcher"},
+		{http.MethodGet, "/games/suggestions?query=witcher"},
 		{http.MethodGet, "/games/" + f.witcher.Game.ID},
 		{http.MethodPost, "/games/batch"},
 	} {
@@ -203,4 +204,50 @@ func (f *routeFixture) testAuthentication(t *testing.T) {
 		f.handler.ServeHTTP(response, req)
 		assertUnauthorizedResponse(t, response)
 	}
+}
+
+func TestSuggestionsRefreshIGDBAndShareTheSearchCache(t *testing.T) {
+	fixture := newRouteFixture(t)
+	for index := range 5 {
+		fixture.provider.games = append(fixture.provider.games, catalog.SourceGame{
+			Source: "igdb", ExternalID: fmt.Sprint(100 + index), Title: fmt.Sprintf("Witcher Quest %d", index), Kind: catalog.KindGame,
+		})
+	}
+	seed := decode[gamePageDTO](t, fixture.get("/games?query=witcher&limit=50"))
+	assertEqual(t, "stored matches before suggestions", len(seed.Items), 8)
+
+	fixture.provider.mu.Lock()
+	fixture.provider.games = append(fixture.provider.games, catalog.SourceGame{
+		Source: "igdb", ExternalID: "200", Title: "Witch", Kind: catalog.KindGame,
+	})
+	fixture.provider.mu.Unlock()
+	page := decode[gamePageDTO](t, fixture.get("/games/suggestions?query=witch"))
+	assertEqual(t, "suggestion count", len(page.Items), 5)
+	assertEqual(t, "new exact match ranks first", page.Items[0].Game.Title, "Witch")
+	assertEqual(t, "no pagination", page.NextCursor, nil)
+	assertEqual(t, "uncached query refreshes despite existing local matches", fixture.provider.searchCount(), 2)
+	detail := decode[gameDetailDTO](t, fixture.get("/games/"+page.Items[0].Game.ID))
+	assertEqual(t, "new suggestion can be opened", detail.Game.Title, "Witch")
+
+	full := decode[gamePageDTO](t, fixture.get("/games?query=++WITCH++&limit=24"))
+	assertEqual(t, "full search is not limited by suggestions", len(full.Items), 9)
+	decode[gamePageDTO](t, fixture.get("/games/suggestions?query=WITCH"))
+	assertEqual(t, "normalized cache is shared with full search", fixture.provider.searchCount(), 2)
+
+	t.Run("successful empty searches are cached", func(t *testing.T) {
+		for range 2 {
+			empty := decode[gamePageDTO](t, fixture.get("/games/suggestions?query=no-matching-game"))
+			assertEqual(t, "empty suggestions", len(empty.Items), 0)
+		}
+		assertEqual(t, "empty provider search is not repeated", fixture.provider.searchCount(), 3)
+	})
+	t.Run("stale cache falls back to local matches during an outage", func(t *testing.T) {
+		fixture.exec(t, `UPDATE catalog.search_queries SET refreshed_at = now() - interval '2 hours'`)
+		fixture.provider.fail(errors.New("igdb unavailable"))
+		fallback := decode[gamePageDTO](t, fixture.get("/games/suggestions?query=witch"))
+		assertEqual(t, "local fallback", len(fallback.Items), 5)
+		assertEqual(t, "stale search attempts a refresh", fixture.provider.searchCount(), 4)
+		assertError(t, fixture.get("/games/suggestions?query=unknown-game"), http.StatusServiceUnavailable, "unavailable")
+		assertEqual(t, "outage cooldown prevents another provider call", fixture.provider.searchCount(), 4)
+	})
 }

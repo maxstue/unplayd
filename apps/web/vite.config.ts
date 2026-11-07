@@ -3,14 +3,17 @@ import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   test: {
-    alias: { "#imports": fileURLToPath(new URL("./test/nuxt-runtime.ts", import.meta.url)) },
+    alias: {
+      "#imports": fileURLToPath(new URL("./test/nuxt-runtime.ts", import.meta.url)),
+      "#shared": fileURLToPath(new URL("./shared", import.meta.url)),
+    },
     include: ["test/**/*.test.ts"],
     environment: "node",
     reporters: ["default", "junit"],
     outputFile: { junit: "coverage/junit.xml" },
     coverage: {
       provider: "v8",
-      include: ["server/**/*.ts", "shared/**/*.ts"],
+      include: ["server/**/*.ts", "shared/**/*.ts", "app/composables/**/*.ts"],
       reportsDirectory: "coverage",
       reporter: [
         "text",

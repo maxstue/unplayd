@@ -1,7 +1,14 @@
 export default defineNuxtConfig({
   compatibilityDate: "2026-10-15",
   telemetry: false,
-  app: { head: { title: "Unplayd", htmlAttrs: { lang: "de" } } },
+  css: ["~/assets/main.css"],
+  app: {
+    head: {
+      title: "Unplayd",
+      htmlAttrs: { lang: "de" },
+      link: [{ rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
+    },
+  },
   modules: ["@nuxt/eslint", "@clerk/nuxt"],
   clerk: {
     skipServerMiddleware: true,
@@ -19,8 +26,10 @@ export default defineNuxtConfig({
     serviceTimeoutMs: 3_000,
   },
   routeRules: {
+    "/favicon.svg": { headers: { "Cache-Control": "public, max-age=86400" } },
     "/": { headers: { "Cache-Control": "no-store" } },
     "/dashboard/**": { headers: { "Cache-Control": "no-store" } },
+    "/games/**": { headers: { "Cache-Control": "no-store" } },
     "/sign-in/**": { headers: { "Cache-Control": "no-store" } },
     "/sign-up/**": { headers: { "Cache-Control": "no-store" } },
     "/api/**": { headers: { "Cache-Control": "no-store" } },

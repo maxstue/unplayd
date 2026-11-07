@@ -295,3 +295,27 @@ func TestRequestLogsCarryRequestIDWithoutCredentials(t *testing.T) {
 		t.Fatal("logs contain credentials or query strings")
 	}
 }
+
+func TestSuggestionsUseABoundedSearch(t *testing.T) {
+	games := &fakeCatalog{page: catalog.SearchPage{Hits: []catalog.SearchHit{{Game: parent}}, NextCursor: "unused"}}
+	response := serve(newTestHandler(testToken, games), http.MethodGet, "/games/suggestions?query=witcher", "")
+	body := decode[gamePageDTO](t, response)
+	if games.search.Query != "witcher" || games.search.Limit != 5 || games.search.Cursor != "" {
+		t.Fatalf("suggestion request = %+v", games.search)
+	}
+	if len(body.Items) != 1 || body.Items[0].Game.ID != parent.ID || body.NextCursor != nil {
+		t.Fatalf("suggestion response = %+v", body)
+	}
+	for _, query := range []string{"", "query=witcher&query=zelda", "query=witcher&limit=50", "query=witcher&cursor=page", "query=%zz"} {
+		before := games.calls
+		response := serve(newTestHandler(testToken, games), http.MethodGet, "/games/suggestions?"+query, "")
+		assertError(t, response, http.StatusBadRequest, "invalid_request")
+		if games.calls != before {
+			t.Fatal("invalid suggestion parameters reached the catalog")
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/games/suggestions?query=witcher", nil)
+	response = httptest.NewRecorder()
+	newTestHandler(testToken, games).ServeHTTP(response, req)
+	assertError(t, response, http.StatusUnauthorized, "unauthorized")
+}

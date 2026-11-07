@@ -269,6 +269,63 @@
         },
         "description": "Each requested ID appears exactly once in items, missingGameIds or inactiveGameIds. Result order is not guaranteed; associate by id. IDs match case-insensitively and are returned in lowercase; IDs that repeat in any case are rejected with 400. Children reference their parent so callers can group them; a batch may reference any stable game UUID, including children. Answered from stored games only, so it stays available while IGDB is down."
       }
+    },
+    "/games/suggestions": {
+      "get": {
+        "operationId": "suggestGames",
+        "summary": "Suggest up to five games using cached IGDB search",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Up to five ranked matches; nextCursor is null.",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        },
+        "description": "Autocomplete backed by the same IGDB search cache as full searches. New or stale queries refresh from IGDB; fresh queries are served locally for 24 hours. Returns up to five ranked active parent games, including parents of matching child games. Provider failures fall back to stored matches, or return unavailable when none exist. A successful provider search with no matches returns an empty list. No pagination is exposed; nextCursor is always null. Only query is accepted."
+      }
     }
   },
   "security": [

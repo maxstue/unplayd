@@ -76,25 +76,21 @@ useHead({ title: "Spiele entdecken · Unplayd" });
       >
         <div class="results-heading">
           <h2 id="results-title">Suchergebnisse</h2>
-          <p v-if="status === 'success'" class="muted" role="status">
+          <output v-if="status === 'success'" class="muted">
             {{ items.length }} {{ items.length === 1 ? "Spiel" : "Spiele"
             }}{{ nextCursor ? " · weitere verfügbar" : "" }}
-          </p>
+          </output>
         </div>
-        <p v-if="status === 'loading'" role="status" class="state-message muted">
+        <output v-if="status === 'loading'" class="state-message muted">
           Spiele werden gesucht …
-        </p>
+        </output>
         <div v-else-if="status === 'error'" role="alert" class="state-message">
           <p>Die Suche ist gerade nicht verfügbar. Bitte versuche es erneut.</p>
           <button type="button" @click="retry()">Erneut versuchen</button>
         </div>
-        <p
-          v-else-if="status === 'success' && !items.length"
-          role="status"
-          class="state-message muted"
-        >
+        <output v-else-if="status === 'success' && !items.length" class="state-message muted">
           Keine Spiele gefunden. Versuche einen anderen Titel.
-        </p>
+        </output>
         <p v-else-if="status === 'idle'" class="muted">Deine Suche beginnt hier.</p>
         <ul v-if="items.length" class="game-grid">
           <li v-for="hit in items" :key="hit.game.id">
@@ -128,7 +124,7 @@ useHead({ title: "Spiele entdecken · Unplayd" });
         </div>
       </section>
     </template>
-    <p v-else-if="!isLoaded" role="status" class="state-message muted">Unplayd wird geladen …</p>
+    <output v-else-if="!isLoaded" class="state-message muted">Unplayd wird geladen …</output>
     <div v-else class="state-message">
       <p>Melde dich an, um Spiele zu suchen und deine eigene Bibliothek aufzubauen.</p>
       <NuxtLink class="button" to="/sign-in">Anmelden</NuxtLink>

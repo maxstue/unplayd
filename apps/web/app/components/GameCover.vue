@@ -21,9 +21,7 @@ watch(
       referrerpolicy="no-referrer"
       @error="failed = true"
     />
-    <span v-else class="cover-fallback" role="img" :aria-label="`Kein Cover für ${title}`">{{
-      title
-    }}</span>
+    <span v-else class="cover-fallback" aria-hidden="true">{{ title }}</span>
     <slot />
   </div>
 </template>

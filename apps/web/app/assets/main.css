@@ -235,7 +235,7 @@ select {
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--line);
 }
-.results-heading p {
+.results-heading output {
   margin-top: 0.35rem;
   font-size: 0.8125rem;
 }
@@ -313,6 +313,9 @@ select {
   max-width: 42rem;
   line-height: 1.65;
   color: var(--muted);
+}
+output {
+  display: block;
 }
 .state-message h1 {
   color: var(--foreground);

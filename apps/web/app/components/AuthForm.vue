@@ -49,19 +49,21 @@ const heading = computed(() => {
   if (step.value === "blocked") return "Noch ein Schritt fehlt.";
   return props.mode === "sign-up" ? "Dein Backlog. Dein Platz." : "Willkommen zurück.";
 });
+function secondFactorDescription() {
+  if (factor.value?.strategy === "totp")
+    return "Gib den aktuellen Code aus deiner Authenticator-App ein.";
+  if (factor.value?.strategy === "backup_code")
+    return "Gib einen deiner unbenutzten Wiederherstellungscodes ein.";
+  if (factor.value?.strategy === "passkey") return "Bestätige die Anmeldung mit deinem Passkey.";
+  const recipient =
+    factor.value && "safeIdentifier" in factor.value ? factor.value.safeIdentifier : "";
+  const recipientSuffix = recipient ? ` (${recipient})` : "";
+  return `Gib den Code aus deiner ${codeDelivery.value} ein${recipientSuffix}.`;
+}
 const description = computed(() => {
   if (step.value === "verify-email")
     return `Gib den Code ein, den wir an ${email.value} geschickt haben.`;
-  if (step.value === "second-factor") {
-    if (factor.value?.strategy === "totp")
-      return "Gib den aktuellen Code aus deiner Authenticator-App ein.";
-    if (factor.value?.strategy === "backup_code")
-      return "Gib einen deiner unbenutzten Wiederherstellungscodes ein.";
-    if (factor.value?.strategy === "passkey") return "Bestätige die Anmeldung mit deinem Passkey.";
-    const recipient =
-      factor.value && "safeIdentifier" in factor.value ? factor.value.safeIdentifier : "";
-    return `Gib den Code aus deiner ${codeDelivery.value} ein${recipient ? ` (${recipient})` : ""}.`;
-  }
+  if (step.value === "second-factor") return secondFactorDescription();
   if (step.value === "recover")
     return "Wir schicken dir einen Code, mit dem du dein Passwort zurücksetzen kannst.";
   if (step.value === "reset")
@@ -102,9 +104,9 @@ watch(step, async () => {
       <h1 id="auth-title" ref="title" tabindex="-1">{{ heading }}</h1>
       <p>{{ description }}</p>
     </div>
-    <p v-if="!incoming.isLoaded.value || !outgoing.isLoaded.value" class="field-hint" role="status">
+    <output v-if="!incoming.isLoaded.value || !outgoing.isLoaded.value" class="field-hint">
       Anmeldung wird vorbereitet …
-    </p>
+    </output>
     <form v-if="step !== 'blocked'" class="auth-form" :aria-busy="busy" @submit.prevent="submit()">
       <div v-if="step === 'credentials' || step === 'recover'" class="auth-field">
         <label for="auth-email">E-Mail-Adresse</label
@@ -188,7 +190,7 @@ watch(step, async () => {
         data-cl-theme="dark"
       />
       <p v-if="error" id="auth-error" role="alert" class="auth-error">{{ error }}</p>
-      <p v-if="notice" role="status" class="field-hint">{{ notice }}</p>
+      <output v-if="notice" class="field-hint">{{ notice }}</output>
       <button class="auth-submit" type="submit" :disabled="!ready">{{ buttonLabel }}</button>
       <button
         v-if="canResend"

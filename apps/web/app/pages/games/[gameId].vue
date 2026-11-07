@@ -65,9 +65,9 @@ const ownershipLabels = { owned: "In Besitz", wishlist: "Wunschliste", subscript
     <NuxtLink :to="{ path: '/', query: { query: route.query.query } }" class="back-link"
       >Zurück zur Suche</NuxtLink
     >
-    <p v-if="status === 'pending'" role="status" class="state-message">
+    <output v-if="status === 'pending'" class="state-message">
       Spieldetails werden geladen …
-    </p>
+    </output>
     <div v-else-if="error" role="alert" class="state-message">
       <h1>
         {{ error.statusCode === 404 ? "Spiel nicht gefunden" : "Spieldetails nicht verfügbar" }}
@@ -104,9 +104,11 @@ const ownershipLabels = { owned: "In Besitz", wishlist: "Wunschliste", subscript
           <p v-if="!detail.game.isActive" class="notice">
             Dieses Spiel ist im Katalog nicht mehr aktiv und kann nicht hinzugefügt werden.
           </p>
-          <p v-if="entryStatus === 'pending'" role="status">Deine Bibliothek wird geprüft …</p>
-          <div v-else-if="entry || added" class="notice" role="status">
-            <h2>{{ added ? "Zur Bibliothek hinzugefügt" : "In deiner Bibliothek" }}</h2>
+          <output v-if="entryStatus === 'pending'">Deine Bibliothek wird geprüft …</output>
+          <div v-else-if="entry || added" class="notice">
+            <h2>
+              <output>{{ added ? "Zur Bibliothek hinzugefügt" : "In deiner Bibliothek" }}</output>
+            </h2>
             <p v-if="entry">
               {{ ownershipLabels[entry.ownership] }} ·
               {{

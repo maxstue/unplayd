@@ -161,84 +161,101 @@ export function usePasswordAuth(
     step.value = "second-factor";
     await prepareFactor(selected);
   }
+  async function submitCredentials() {
+    if (mode === "sign-up") {
+      const result = await signUp().create({
+        emailAddress: email.value.trim(),
+        password: password.value,
+      });
+      password.value = "";
+      if (result.status === "complete") {
+        await finish(result);
+        return;
+      }
+      if (result.missingFields.length || !result.unverifiedFields.includes("email_address")) {
+        block();
+        return;
+      }
+      step.value = "verify-email";
+      await signUp().prepareEmailAddressVerification({ strategy: "email_code" });
+      startCooldown();
+      return;
+    }
+    const result = await signIn().create({
+      strategy: "password",
+      identifier: email.value.trim(),
+      password: password.value,
+    });
+    password.value = "";
+    await advanceSignIn(result);
+  }
+  async function submitFactor() {
+    const strategy = factor.value?.strategy;
+    if (!strategy) {
+      block();
+      return;
+    }
+    let result: SignIn;
+    if (strategy === "passkey") result = await signIn().authenticateWithPasskey();
+    else if (firstFactor && strategy === "email_code")
+      result = await signIn().attemptFirstFactor({ strategy, code: code.value.trim() });
+    else if (["totp", "backup_code", "email_code", "phone_code"].includes(strategy))
+      result = await signIn().attemptSecondFactor({
+        strategy: strategy as "totp" | "backup_code" | "email_code" | "phone_code",
+        code: code.value.trim(),
+      });
+    else {
+      block();
+      return;
+    }
+    code.value = "";
+    await advanceSignIn(result);
+  }
+  async function requestReset() {
+    await signIn().create({
+      strategy: "reset_password_email_code",
+      identifier: email.value.trim(),
+    });
+    step.value = "reset";
+    password.value = "";
+    code.value = "";
+    startCooldown();
+  }
+  async function submitReset() {
+    const result = await signIn().attemptFirstFactor({
+      strategy: "reset_password_email_code",
+      code: code.value.trim(),
+      password: password.value,
+    });
+    if (result.status !== "needs_new_password") password.value = "";
+    code.value = "";
+    await advanceSignIn(result);
+  }
+  async function submitRenewal() {
+    const result = await signIn().resetPassword({
+      password: password.value,
+      signOutOfOtherSessions: true,
+    });
+    password.value = "";
+    await advanceSignIn(result);
+  }
   async function submit() {
     await run(async () => {
-      if (step.value === "credentials") {
-        if (mode === "sign-up") {
-          const result = await signUp().create({
-            emailAddress: email.value.trim(),
-            password: password.value,
-          });
-          password.value = "";
-          if (result.status === "complete") {
-            await finish(result);
-            return;
-          }
-          if (result.missingFields.length || !result.unverifiedFields.includes("email_address")) {
-            block();
-            return;
-          }
-          step.value = "verify-email";
-          await signUp().prepareEmailAddressVerification({ strategy: "email_code" });
-          startCooldown();
-        } else {
-          const result = await signIn().create({
-            strategy: "password",
-            identifier: email.value.trim(),
-            password: password.value,
-          });
-          password.value = "";
-          await advanceSignIn(result);
-        }
-      } else if (step.value === "verify-email") {
-        const result = await signUp().attemptEmailAddressVerification({ code: code.value.trim() });
-        await finish(result);
-      } else if (step.value === "second-factor") {
-        const strategy = factor.value?.strategy;
-        if (!strategy) {
-          block();
-          return;
-        }
-        let result: SignIn;
-        if (strategy === "passkey") result = await signIn().authenticateWithPasskey();
-        else if (firstFactor && strategy === "email_code")
-          result = await signIn().attemptFirstFactor({ strategy, code: code.value.trim() });
-        else if (["totp", "backup_code", "email_code", "phone_code"].includes(strategy))
-          result = await signIn().attemptSecondFactor({
-            strategy: strategy as "totp" | "backup_code" | "email_code" | "phone_code",
-            code: code.value.trim(),
-          });
-        else {
-          block();
-          return;
-        }
-        code.value = "";
-        await advanceSignIn(result);
-      } else if (step.value === "recover") {
-        await signIn().create({
-          strategy: "reset_password_email_code",
-          identifier: email.value.trim(),
-        });
-        step.value = "reset";
-        password.value = "";
-        code.value = "";
-        startCooldown();
-      } else if (step.value === "reset") {
-        const result = await signIn().attemptFirstFactor({
-          strategy: "reset_password_email_code",
-          code: code.value.trim(),
-          password: password.value,
-        });
-        if (result.status !== "needs_new_password") password.value = "";
-        code.value = "";
-        await advanceSignIn(result);
-      } else if (step.value === "renew") {
-        const result = await signIn().resetPassword({
-          password: password.value,
-          signOutOfOtherSessions: true,
-        });
-        password.value = "";
-        await advanceSignIn(result);
+      switch (step.value) {
+        case "credentials":
+          return submitCredentials();
+        case "verify-email":
+          return finish(
+            await signUp().attemptEmailAddressVerification({ code: code.value.trim() }),
+          );
+        case "second-factor":
+          return submitFactor();
+        case "recover":
+          return requestReset();
+        case "reset":
+          return submitReset();
+        case "renew":
+          return submitRenewal();
       }
     });
   }

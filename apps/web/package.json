@@ -17,11 +17,11 @@
     "test:build": "node --test --test-reporter=spec test/production/*.test.mjs"
   },
   "dependencies": {
-    "@clerk/nuxt": "3.1.21",
+    "@clerk/nuxt": "3.1.22",
     "h3": "1.15.11",
     "nuxt": "4.6.4",
     "openapi-fetch": "0.17.0",
-    "vue": "3.5.44",
+    "vue": "3.5.45",
     "vue-router": "5.4.0"
   },
   "devDependencies": {
@@ -30,7 +30,7 @@
     "@typescript/native": "npm:typescript@7.0.2",
     "@vitest/coverage-v8": "catalog:",
     "eslint": "10.14.0",
-    "eslint-plugin-oxlint": "1.90.0",
+    "eslint-plugin-oxlint": "1.92.0",
     "typescript": "npm:@typescript/typescript6@6.0.2",
     "vite-plus": "catalog:",
     "vitest": "catalog:",

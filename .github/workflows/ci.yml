@@ -20,7 +20,7 @@ jobs:
           persist-credentials: false
       - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
         with:
-          node-version: 24.21.0
+          node-version: 24.22.2
           cache: true
           run-install: false
       - run: vp install --frozen-lockfile
@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
       - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
         with:
-          node-version: 24.21.0
+          node-version: 24.22.2
           cache: true
           run-install: false
       - run: vp install --frozen-lockfile
@@ -145,7 +145,7 @@ jobs:
           name: catalog-api-reports
           path: apps/catalog-api/
       - name: Scan and wait for Quality Gate
-        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8.4.1
         with:
           args: -Dsonar.qualitygate.wait=true
         env:

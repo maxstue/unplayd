@@ -1,7 +1,7 @@
 export default defineNuxtConfig({
   compatibilityDate: "2026-10-15",
   telemetry: false,
-  css: ["~/assets/main.css"],
+  css: ["~/assets/main.css", "~/assets/library.css"],
   app: {
     head: {
       title: "Unplayd",
@@ -29,6 +29,7 @@ export default defineNuxtConfig({
     "/favicon.svg": { headers: { "Cache-Control": "public, max-age=86400" } },
     "/": { headers: { "Cache-Control": "no-store" } },
     "/dashboard/**": { headers: { "Cache-Control": "no-store" } },
+    "/library/**": { headers: { "Cache-Control": "no-store" } },
     "/games/**": { headers: { "Cache-Control": "no-store" } },
     "/sign-in/**": { headers: { "Cache-Control": "no-store" } },
     "/sign-up/**": { headers: { "Cache-Control": "no-store" } },

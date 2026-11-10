@@ -15,6 +15,8 @@ import suggestions from "../server/api/games/suggestions.get";
 import detail from "../server/api/games/[gameId].get";
 import batch from "../server/api/games/batch.post";
 import library from "../server/api/library/index.get";
+import platforms from "../server/api/library/platforms.get";
+import overview from "../server/api/library/overview.get";
 import entry from "../server/api/library/[gameId].get";
 import add from "../server/api/library/index.post";
 import status from "../server/api/library/[gameId]/status.put";
@@ -73,6 +75,8 @@ function app() {
     .get("/api/games/:gameId", detail)
     .post("/api/games/batch", batch)
     .get("/api/library", library)
+    .get("/api/library/platforms", platforms)
+    .get("/api/library/overview", overview)
     .post("/api/library", add)
     .get("/api/library/:gameId", entry)
     .put("/api/library/:gameId/status", status)
@@ -126,6 +130,113 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetcher);
 });
 afterEach(() => vi.unstubAllGlobals());
+
+it("counts every own library page without requiring catalog availability", async () => {
+  fetcher.mockImplementation(async (input) => {
+    const request = input as Request;
+    expect(request.url.startsWith(config.userApiUrl)).toBe(true);
+    expect(request.headers.get("Authorization")).toBe(`Bearer ${aliceToken}`);
+    return Response.json(
+      new URL(request.url).searchParams.has("cursor")
+        ? {
+            items: [
+              { ...second, status: "playing" },
+              { ...fixture(), status: "completed" },
+            ],
+            nextCursor: null,
+          }
+        : { items: [first], nextCursor: "next" },
+    );
+  });
+  const response = await send("/api/library/overview");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    total: 3,
+    statuses: { backlog: 1, playing: 1, completed: 1, paused: 0, dropped: 0 },
+  });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it("reports an empty overview and rejects unsigned sessions without upstream requests", async () => {
+  expect(
+    (await send("/api/library/overview", "GET", undefined, { "x-test-session": "none" })).status,
+  ).toBe(401);
+  expect(fetcher).not.toHaveBeenCalled();
+  fetcher.mockResolvedValue(Response.json({ items: [], nextCursor: null }));
+  expect(await (await send("/api/library/overview")).json()).toEqual({
+    total: 0,
+    statuses: { backlog: 0, playing: 0, completed: 0, paused: 0, dropped: 0 },
+  });
+});
+
+it("refuses malformed overview pages and repeated cursors", async () => {
+  for (const page of [
+    { items: [{ ...first, status: "unknown" }], nextCursor: null },
+    { items: Array.from({ length: 51 }, () => first), nextCursor: null },
+    { items: [], nextCursor: "loop" },
+  ]) {
+    fetcher.mockImplementation(async () => Response.json(page));
+    expect((await send("/api/library/overview")).status).toBe(503);
+  }
+});
+
+it("collects assigned platforms across every library page without returning private entry data", async () => {
+  const pc = randomUUID();
+  const consoleId = randomUUID();
+  const firstEntry = { ...first, platformId: pc };
+  const laterEntry = { ...second, platformId: consoleId };
+  fetcher.mockImplementation(async (input) => {
+    const request = input as Request;
+    if (request.url.startsWith(config.userApiUrl)) {
+      expect(request.headers.get("Authorization")).toBe(`Bearer ${aliceToken}`);
+      return Response.json(
+        new URL(request.url).searchParams.has("cursor")
+          ? { items: [firstEntry, laterEntry], nextCursor: null }
+          : { items: [firstEntry], nextCursor: "later" },
+      );
+    }
+    const body = (await request.clone().json()) as { gameIds: string[] };
+    return Response.json({
+      items: body.gameIds.map((gameId) => ({
+        ...game(gameId),
+        platforms: [
+          { id: pc, name: "PC" },
+          { id: consoleId, name: "Konsole" },
+        ],
+      })),
+      missingGameIds: [],
+      inactiveGameIds: [],
+    });
+  });
+  const response = await send("/api/library/platforms");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual([
+    { id: consoleId, name: "Konsole" },
+    { id: pc, name: "PC" },
+  ]);
+  expect(requests().filter((request) => request.url.startsWith(config.userApiUrl))).toHaveLength(2);
+  expect(await requests().at(-1)!.json()).toEqual({ gameIds: [second.gameId] });
+});
+
+it("retains filter choices during catalog outages and terminates repeated upstream cursors", async () => {
+  const platformId = randomUUID();
+  fetcher.mockImplementation(async (input) =>
+    (input as Request).url.startsWith(config.userApiUrl)
+      ? Response.json({ items: [{ ...first, platformId }], nextCursor: null })
+      : new Response(null, { status: 503 }),
+  );
+  const response = await send("/api/library/platforms");
+  expect(await response.json()).toEqual([{ id: platformId, name: "Plattform nicht verfügbar" }]);
+  fetcher.mockImplementation(async () => Response.json({ items: [], nextCursor: "repeated" }));
+  expect((await send("/api/library/platforms")).status).toBe(503);
+});
+
+it("requires a session for platform choices", async () => {
+  expect(
+    (await send("/api/library/platforms", "GET", undefined, { "x-test-session": "none" })).status,
+  ).toBe(401);
+  expect(fetcher).not.toHaveBeenCalled();
+});
 
 it("aggregates a page with one batch and forwards only the appropriate credentials and filters", async () => {
   fetcher.mockImplementation(async (input) => {

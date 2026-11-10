@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { kindLabels, type GameDetailView } from "#shared/catalog";
+import { libraryReturnPath, type LibraryEntryView } from "#shared/library";
 definePageMeta({ middleware: "auth", key: (route) => route.params.gameId as string });
 const route = useRoute();
+const returnTo = computed(() => libraryReturnPath(route.query.returnTo));
 const id = route.params.gameId as string;
 const {
   data: detail,
@@ -14,7 +16,7 @@ const {
   status: entryStatus,
   error: entryError,
   refresh: refreshEntry,
-} = await useLazyFetch(`/api/library/${id}`);
+} = await useLazyFetch<LibraryEntryView>(`/api/library/${id}`);
 const knownEntries = useState<Record<string, boolean>>("known-library-entries", () => ({}));
 const ownership = ref<"owned" | "wishlist" | "subscription">("owned");
 const platformId = ref("");
@@ -62,8 +64,16 @@ const ownershipLabels = { owned: "In Besitz", wishlist: "Wunschliste", subscript
 
 <template>
   <section>
-    <NuxtLink :to="{ path: '/', query: { query: route.query.query } }" class="back-link"
-      >Zurück zur Suche</NuxtLink
+    <NuxtLink
+      :to="returnTo ?? { path: '/', query: { query: route.query.query } }"
+      class="back-link"
+      >{{
+        returnTo?.startsWith("/library")
+          ? "Zurück zur Bibliothek"
+          : returnTo
+            ? "Zurück zum Dashboard"
+            : "Zurück zur Suche"
+      }}</NuxtLink
     >
     <output v-if="status === 'pending'" class="state-message">
       Spieldetails werden geladen …
@@ -91,7 +101,10 @@ const ownershipLabels = { owned: "In Besitz", wishlist: "Wunschliste", subscript
         <div class="detail-main">
           <NuxtLink
             v-if="detail.game.parent"
-            :to="{ path: `/games/${detail.game.parent.id}`, query: { query: route.query.query } }"
+            :to="{
+              path: `/games/${detail.game.parent.id}`,
+              query: { query: route.query.query, returnTo: returnTo ?? undefined },
+            }"
             >Hauptspiel: {{ detail.game.parent.title }}</NuxtLink
           >
           <h1>{{ detail.game.title }}</h1>
@@ -168,9 +181,13 @@ const ownershipLabels = { owned: "In Besitz", wishlist: "Wunschliste", subscript
           <h3>{{ kindLabels[group.kind] ?? group.kind }}</h3>
           <ul class="related-list">
             <li v-for="child in group.games" :key="child.id">
-              <NuxtLink :to="{ path: `/games/${child.id}`, query: { query: route.query.query } }">{{
-                child.title
-              }}</NuxtLink>
+              <NuxtLink
+                :to="{
+                  path: `/games/${child.id}`,
+                  query: { query: route.query.query, returnTo: returnTo ?? undefined },
+                }"
+                >{{ child.title }}</NuxtLink
+              >
             </li>
           </ul>
         </section>

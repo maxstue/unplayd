@@ -13,6 +13,42 @@
   --accent-foreground: #18181b;
   --danger: #fca5a5;
 }
+.library-filters,
+.dashboard-actions,
+.section-heading,
+.pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.library-filters {
+  align-items: end;
+  margin-bottom: 2rem;
+}
+.library-filters > div {
+  flex: 1;
+  min-width: min(100%, 12rem);
+}
+.library-grid {
+  margin-top: 1.5rem;
+}
+.library-card > * + * {
+  margin-top: 0.6rem;
+}
+.library-card button {
+  width: 100%;
+}
+.dashboard-section {
+  margin-top: 3rem;
+}
+.section-heading {
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+.pagination a {
+  min-height: 44px;
+}
 * {
   box-sizing: border-box;
 }
@@ -92,6 +128,14 @@ h3 {
 }
 .app-header {
   border-bottom: 1px solid var(--line);
+}
+@media (min-width: 701px) {
+  .app-header {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background: var(--background);
+  }
 }
 .header-content,
 .page-content,
@@ -450,10 +494,12 @@ output {
   nav {
     order: 3;
     flex-basis: 100%;
-    gap: 1.5rem;
+    gap: 1rem;
+    flex-wrap: wrap;
   }
   nav a {
     min-height: 48px;
+    font-size: 0.8125rem;
   }
   .page-content {
     padding-block: 2.5rem;

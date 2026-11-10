@@ -26,7 +26,10 @@ watch(userId, (current, previous) => {
             "
             >Spiele entdecken</NuxtLink
           >
-          <Show when="signed-in"><NuxtLink to="/dashboard">Mein Konto</NuxtLink></Show>
+          <Show when="signed-in"
+            ><NuxtLink to="/dashboard">Dashboard</NuxtLink
+            ><NuxtLink to="/library">Bibliothek</NuxtLink></Show
+          >
         </nav>
         <Show when="signed-out">
           <NuxtLink v-if="!isAuthPage" to="/sign-in" class="button secondary">Anmelden</NuxtLink>

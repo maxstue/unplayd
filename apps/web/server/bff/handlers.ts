@@ -1,6 +1,7 @@
 import { setResponseStatus, type H3Event } from "h3";
-import { withServices, upstream } from "../clients/request";
+import { withServices, upstream, publicError } from "../clients/request";
 import type { ServicesConfig } from "../clients/config";
+import { statusLabels, type LibraryOverview } from "../../shared/library";
 import { enrichEntries } from "./library";
 import {
   addEntryBody,
@@ -110,6 +111,84 @@ export function getLibraryEntry(event: H3Event, config: ServicesConfig, fetcher?
         )
       ).data;
       return (await enrichEntries([entry], s)).items[0];
+    },
+    fetcher,
+  );
+}
+export function listLibraryPlatforms(
+  event: H3Event,
+  config: ServicesConfig,
+  fetcher?: typeof fetch,
+) {
+  return withServices(
+    event,
+    config,
+    async (s) => {
+      const platforms = new Map<string, string>();
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const page = (
+          await upstream(
+            () => s.user.GET("/library", { params: { query: { limit: 50, cursor } } }),
+            "user",
+            s.requestId,
+          )
+        ).data;
+        const enriched = await enrichEntries(
+          page.items.filter((entry) => entry.platformId && !platforms.has(entry.platformId)),
+          s,
+        );
+        for (const entry of enriched.items) {
+          if (!entry.platformId) continue;
+          platforms.set(
+            entry.platformId,
+            entry.game?.platforms.find((p) => p.id === entry.platformId)?.name ??
+              "Plattform nicht verfügbar",
+          );
+        }
+        cursor = page.nextCursor ?? undefined;
+        if (cursor && seen.has(cursor)) throw publicError(503, s.requestId);
+        if (cursor) seen.add(cursor);
+      } while (cursor);
+      return [...platforms]
+        .map(([id, name]) => ({ id, name }))
+        .sort((a, b) => a.name.localeCompare(b.name, "de"));
+    },
+    fetcher,
+  );
+}
+export function getLibraryOverview(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
+  return withServices(
+    event,
+    config,
+    async (s) => {
+      const result: LibraryOverview = {
+        total: 0,
+        statuses: { backlog: 0, playing: 0, paused: 0, completed: 0, dropped: 0 },
+      };
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const page = (
+          await upstream(
+            () => s.user.GET("/library", { params: { query: { limit: 50, cursor } } }),
+            "user",
+            s.requestId,
+          )
+        ).data;
+        if (!Array.isArray(page.items) || page.items.length > 50)
+          throw publicError(503, s.requestId);
+        for (const entry of page.items) {
+          if (!Object.hasOwn(statusLabels, entry.status)) throw publicError(503, s.requestId);
+          result.total++;
+          result.statuses[entry.status]++;
+        }
+        cursor = page.nextCursor ?? undefined;
+        if (cursor && seen.has(cursor)) throw publicError(503, s.requestId);
+        if (cursor) seen.add(cursor);
+      } while (cursor);
+      return result;
     },
     fetcher,
   );

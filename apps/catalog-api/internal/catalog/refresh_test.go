@@ -115,30 +115,49 @@ func TestRefreshWorkerOutcomes(t *testing.T) {
 			if tc.credentials && attempts != 0 {
 				t.Fatalf("auth consumed attempt: %d", attempts)
 			}
+			if tc.want == "failed" {
+				dueRefresh(t, db)
+				if _, err := store.claimRefresh(t.Context(), p); !errors.Is(err, sql.ErrNoRows) {
+					t.Fatalf("permanent failure reclaimed: %v", err)
+				}
+			}
 		})
 	}
 }
-func TestRefreshRetriesAreBounded(t *testing.T) {
+func TestTransientRefreshFailuresStartANewRoundAfterRecovery(t *testing.T) {
 	store, db := newTestStore(t)
 	upsertOne(t, store, zelda)
-	dueRefresh(t, db)
 	p := DefaultRefreshPolicy()
-	for n := 1; n <= p.MaxAttempts; n++ {
-		j, err := store.claimRefresh(t.Context(), p)
-		if err != nil {
+	source := &fakeSource{games: []SourceGame{zelda}, err: errors.New("offline")}
+	importer := NewImporter(source, store)
+	logger := slog.New(slog.DiscardHandler)
+	for attempt := 1; attempt <= p.MaxAttempts; attempt++ {
+		dueRefresh(t, db)
+		store.runNextRefresh(t.Context(), importer, p, nil, nil, logger)
+		var actual int
+		var delay float64
+		if err := db.QueryRow(`SELECT attempts,extract(epoch FROM next_run_at-now()) FROM catalog.refresh_jobs WHERE state='pending' AND last_error_code='provider_unavailable'`).Scan(&actual, &delay); err != nil {
 			t.Fatal(err)
 		}
-		if j.Attempts != n {
-			t.Fatalf("attempt %d", j.Attempts)
+		if actual != attempt {
+			t.Fatalf("attempt=%d, want %d", actual, attempt)
 		}
-		if err := store.finishRefresh(t.Context(), j, nil, 0, "provider_unavailable", n == p.MaxAttempts); err != nil {
-			t.Fatal(err)
+		if attempt == p.MaxAttempts && delay < p.Recovery.Seconds()-1 {
+			t.Fatalf("exhausted retry round waits %fs, want at least %v", delay, p.Recovery)
 		}
 	}
 	if _, err := store.claimRefresh(t.Context(), p); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("failed job reclaimed: %v", err)
+		t.Fatalf("refresh reclaimed before recovery: %v", err)
 	}
+	// The next round must call the provider again and commit its recovered data.
+	dueRefresh(t, db)
+	source.err = nil
+	source.games[0].Title = "Recovered title"
+	store.runNextRefresh(t.Context(), importer, p, nil, nil, logger)
+	assertCount(t, db, 1, `SELECT count(*) FROM catalog.refresh_jobs WHERE state='pending' AND attempts=0 AND last_error_code IS NULL AND last_success_at IS NOT NULL`)
+	assertCount(t, db, 1, `SELECT count(*) FROM catalog.games WHERE title='Recovered title'`)
 }
+
 func TestSearchCleanupRetainsGamesAndRecentQueries(t *testing.T) {
 	store, db := newTestStore(t)
 	game := upsertOne(t, store, zelda)

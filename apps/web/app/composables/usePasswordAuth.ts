@@ -1,4 +1,4 @@
-import { computed, onScopeDispose, ref, watch, type Ref } from "vue";
+import { computed, onScopeDispose, ref, shallowRef, watch, type Ref } from "vue";
 import type { useSignIn, useSignUp } from "@clerk/nuxt/composables";
 import { authErrorMessage } from "#shared/auth";
 
@@ -14,6 +14,11 @@ type Step =
   | "reset"
   | "renew"
   | "blocked";
+type EmailFactor = Extract<Factor, { strategy: "email_code" }>;
+type Challenge =
+  | { step: "second-factor"; level: "first"; factor: EmailFactor; factors: EmailFactor[] }
+  | { step: "second-factor"; level: "second"; factor: Factor; factors: Factor[] };
+type AuthState = { step: Exclude<Step, "second-factor"> } | Challenge;
 export interface PasswordAuthSdk {
   signIn: Readonly<Ref<SignIn | undefined>>;
   signUp: Readonly<Ref<SignUp | undefined>>;
@@ -26,7 +31,13 @@ export function usePasswordAuth(
   sdk: PasswordAuthSdk,
   onComplete: () => Promise<void>,
 ) {
-  const step = ref<Step>("credentials");
+  const state = shallowRef<AuthState>({ step: "credentials" });
+  const step = computed(() => state.value.step);
+  const challenge = computed(() =>
+    state.value.step === "second-factor" ? state.value : undefined,
+  );
+  const factor = computed(() => challenge.value?.factor);
+  const factors = computed(() => challenge.value?.factors ?? []);
   const email = ref("");
   const password = ref("");
   const code = ref("");
@@ -34,9 +45,6 @@ export function usePasswordAuth(
   const notice = ref("");
   const busy = ref(false);
   const resendIn = ref(0);
-  const factor = ref<Factor>();
-  const factors = ref<Factor[]>([]);
-  let firstFactor = false;
   let disposed = false;
   let cooldown: ReturnType<typeof setInterval> | undefined;
   const ready = computed(() => sdk.isLoaded.value && !busy.value);
@@ -62,7 +70,19 @@ export function usePasswordAuth(
     }
     return sdk.signUp.value;
   }
+  function enter(next: AuthState) {
+    if (disposed) {
+      return;
+    }
+    clearInterval(cooldown);
+    resendIn.value = 0;
+    code.value = "";
+    state.value = next;
+  }
   function startCooldown() {
+    if (disposed) {
+      return;
+    }
     clearInterval(cooldown);
     resendIn.value = 30;
     cooldown = setInterval(() => {
@@ -90,7 +110,7 @@ export function usePasswordAuth(
     }
   }
   function block() {
-    step.value = "blocked";
+    enter({ step: "blocked" });
     error.value =
       "Für dieses Konto ist ein weiterer Sicherheitsschritt erforderlich, der hier noch nicht unterstützt wird. Die Anmeldung wurde nicht abgeschlossen.";
   }
@@ -118,11 +138,11 @@ export function usePasswordAuth(
       },
     });
   }
-  async function prepareFactor(selected: Factor) {
-    factor.value = selected;
-    code.value = "";
+  async function prepareFactor(next: Challenge) {
+    enter(next);
+    const selected = next.factor;
     if (selected.strategy === "email_code") {
-      if (firstFactor) {
+      if (next.level === "first") {
         await signIn().prepareFirstFactor({
           strategy: "email_code",
           emailAddressId: selected.emailAddressId,
@@ -151,32 +171,45 @@ export function usePasswordAuth(
       return;
     }
     if (result.status === "needs_new_password") {
-      step.value = "renew";
+      enter({ step: "renew" });
       return;
     }
-    firstFactor = result.status === "needs_first_factor";
-    const available = firstFactor ? result.supportedFirstFactors : result.supportedSecondFactors;
-    const strategies = firstFactor
-      ? ["email_code"]
-      : ["totp", "email_code", "phone_code", "backup_code", "passkey"];
-    if (
-      !["needs_first_factor", "needs_second_factor", "needs_client_trust"].includes(
-        result.status ?? "",
-      )
-    ) {
+    if (result.status === "needs_first_factor") {
+      const available = (result.supportedFirstFactors ?? []).filter(
+        (item): item is EmailFactor => item.strategy === "email_code",
+      );
+      const selected = available[0];
+      if (selected) {
+        await prepareFactor({
+          step: "second-factor",
+          level: "first",
+          factor: selected,
+          factors: available,
+        });
+      } else {
+        block();
+      }
+      return;
+    }
+    if (result.status !== "needs_second_factor" && result.status !== "needs_client_trust") {
       block();
       return;
     }
-    factors.value = strategies.flatMap((strategy) =>
-      (available ?? []).filter((item) => item.strategy === strategy),
-    ) as Factor[];
-    const selected = factors.value[0];
-    if (!selected) {
+    const available = ["totp", "email_code", "phone_code", "backup_code", "passkey"].flatMap(
+      (strategy) =>
+        (result.supportedSecondFactors ?? []).filter((item) => item.strategy === strategy),
+    );
+    const selected = available[0];
+    if (selected) {
+      await prepareFactor({
+        step: "second-factor",
+        level: "second",
+        factor: selected,
+        factors: available,
+      });
+    } else {
       block();
-      return;
     }
-    step.value = "second-factor";
-    await prepareFactor(selected);
   }
   async function submitCredentials() {
     if (mode === "sign-up") {
@@ -184,6 +217,9 @@ export function usePasswordAuth(
         emailAddress: email.value.trim(),
         password: password.value,
       });
+      if (disposed) {
+        return;
+      }
       password.value = "";
       if (result.status === "complete") {
         await finish(result);
@@ -193,7 +229,7 @@ export function usePasswordAuth(
         block();
         return;
       }
-      step.value = "verify-email";
+      enter({ step: "verify-email" });
       await signUp().prepareEmailAddressVerification({ strategy: "email_code" });
       startCooldown();
       return;
@@ -207,15 +243,16 @@ export function usePasswordAuth(
     await advanceSignIn(result);
   }
   async function submitFactor() {
-    const strategy = factor.value?.strategy;
-    if (!strategy) {
+    const current = challenge.value;
+    const strategy = current?.factor.strategy;
+    if (!current || !strategy) {
       block();
       return;
     }
     let result: SignIn;
     if (strategy === "passkey") {
       result = await signIn().authenticateWithPasskey();
-    } else if (firstFactor && strategy === "email_code") {
+    } else if (current.level === "first" && strategy === "email_code") {
       result = await signIn().attemptFirstFactor({ strategy, code: code.value.trim() });
     } else if (["totp", "backup_code", "email_code", "phone_code"].includes(strategy)) {
       result = await signIn().attemptSecondFactor({
@@ -234,7 +271,10 @@ export function usePasswordAuth(
       strategy: "reset_password_email_code",
       identifier: email.value.trim(),
     });
-    step.value = "reset";
+    if (disposed) {
+      return;
+    }
+    enter({ step: "reset" });
     password.value = "";
     code.value = "";
     startCooldown();
@@ -293,33 +333,42 @@ export function usePasswordAuth(
           identifier: email.value.trim(),
         });
         startCooldown();
-      } else if (factor.value) {
-        await prepareFactor(factor.value);
+      } else if (challenge.value) {
+        await prepareFactor(challenge.value);
       }
-      notice.value = "Ein neuer Code wurde angefordert.";
+      if (!disposed) {
+        notice.value = "Ein neuer Code wurde angefordert.";
+      }
     });
   }
   async function selectFactor(strategy: string) {
     await run(async () => {
-      const selected = factors.value.find((item) => item.strategy === strategy);
-      if (selected) {
-        await prepareFactor(selected);
+      const current = challenge.value;
+      if (!current) {
+        return;
+      }
+      if (current.level === "first") {
+        const selected = current.factors.find((item) => item.strategy === strategy);
+        if (selected) {
+          await prepareFactor({ ...current, factor: selected });
+        }
+      } else {
+        const selected = current.factors.find((item) => item.strategy === strategy);
+        if (selected) {
+          await prepareFactor({ ...current, factor: selected });
+        }
       }
     });
   }
   function restart(recovery = false) {
-    if (busy.value) {
+    if (busy.value || disposed) {
       return;
     }
-    step.value = recovery ? "recover" : "credentials";
+    enter({ step: recovery ? "recover" : "credentials" });
     password.value = "";
     code.value = "";
     error.value = "";
     notice.value = "";
-    factor.value = undefined;
-    factors.value = [];
-    clearInterval(cooldown);
-    resendIn.value = 0;
   }
   // Restore only an unfinished email verification, never a password or code.
   const stopRestore = watch(
@@ -335,7 +384,7 @@ export function usePasswordAuth(
         !pending.missingFields.length
       ) {
         email.value = pending.emailAddress ?? "";
-        step.value = "verify-email";
+        enter({ step: "verify-email" });
       }
     },
     { immediate: true },

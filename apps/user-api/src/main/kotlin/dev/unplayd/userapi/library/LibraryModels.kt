@@ -1,6 +1,5 @@
 package dev.unplayd.userapi.library
 
-import dev.unplayd.userapi.identity.LibraryEntry
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.time.Instant
@@ -19,6 +18,27 @@ internal fun uuid(value: String?): UUID =
     value
         ?.takeIf { it.matches(Regex("[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")) }
         ?.let(UUID::fromString) ?: throw LibraryProblem(400, "Invalid UUID")
+
+@Serializable
+data class GameSnapshot(
+    val title: String,
+    val coverUrl: String?,
+)
+
+@Serializable
+data class LibraryEntry(
+    val id: String,
+    val gameId: String,
+    val platformId: String?,
+    val ownership: String,
+    val status: String,
+    val favorite: Boolean,
+    val rating: Int?,
+    val note: String?,
+    val snapshot: GameSnapshot,
+    val createdAt: String,
+    val updatedAt: String,
+)
 
 @Serializable
 data class AddLibraryEntry(
@@ -84,3 +104,20 @@ class LibraryFilter(
             }
     }
 }
+
+@Serializable
+data class LibraryOverview(
+    val total: Int,
+    val statuses: Map<String, Int>,
+)
+
+@Serializable
+data class LibraryPlatform(
+    val platformId: String,
+    val gameId: String,
+)
+
+@Serializable
+data class LibraryPlatforms(
+    val items: List<LibraryPlatform>,
+)

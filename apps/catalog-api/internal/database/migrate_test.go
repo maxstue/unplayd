@@ -153,7 +153,7 @@ func assertSQLTrue(t *testing.T, db *sql.DB, query string, args ...any) {
 
 func TestMigrateUpgradesAndRepeatsWithoutChangingCatalogIdentity(t *testing.T) {
 	fixture := newPostgresFixture(t)
-	v1, latest := uint(1), uint(7)
+	v1, latest := uint(1), uint(8)
 	applyMigrations(t, fixture.config, &v1)
 	var gameID string
 	var createdAt, updatedAt time.Time
@@ -175,14 +175,14 @@ func TestMigrateUpgradesAndRepeatsWithoutChangingCatalogIdentity(t *testing.T) {
 			AND created_at = $2 AND updated_at = $3 FROM catalog.games WHERE id = $1`, gameID, createdAt, updatedAt)
 		assertSQLTrue(t, fixture.db, `SELECT count(*) = 1 AND bool_and(game_id = $1::uuid)
 			FROM catalog.external_game_ids WHERE source = 'igdb' AND external_id = '42'`, gameID)
-		assertSQLTrue(t, fixture.db, `SELECT version = 7 AND NOT dirty FROM catalog.schema_migrations`)
+		assertSQLTrue(t, fixture.db, `SELECT version = 8 AND NOT dirty FROM catalog.schema_migrations`)
 	})
 	t.Run("downgrade is refused without changing version or data", func(t *testing.T) {
 		err := Migrate(t.Context(), fixture.config, &v1)
-		if err == nil || !strings.Contains(err.Error(), "refusing downgrade from version 7") {
+		if err == nil || !strings.Contains(err.Error(), "refusing downgrade from version 8") {
 			t.Fatalf("expected forward-only migration error, got %v", err)
 		}
-		assertSQLTrue(t, fixture.db, `SELECT version = 7 AND NOT dirty FROM catalog.schema_migrations`)
+		assertSQLTrue(t, fixture.db, `SELECT version = 8 AND NOT dirty FROM catalog.schema_migrations`)
 		assertSQLTrue(t, fixture.db, `SELECT count(*) = 1 FROM catalog.external_game_ids WHERE game_id = $1`, gameID)
 	})
 }
@@ -461,4 +461,29 @@ func TestRefreshMigrationBackfillsOnlyActiveIGDBGames(t *testing.T) {
 	applyMigrations(t, fixture.config, nil)
 	assertSQLTrue(t, fixture.db, `SELECT count(*)=1 FROM catalog.refresh_jobs`)
 	assertPostgresError(t, fixture.db, "23514", `UPDATE catalog.refresh_jobs SET state='running'`)
+}
+
+func TestRecoveryMigrationRequeuesOnlyTerminalTransientFailures(t *testing.T) {
+	fixture := newPostgresFixture(t)
+	v7 := uint(7)
+	applyMigrations(t, fixture.config, &v7)
+	transient := insertGame(t, fixture.db, "Transient failure")
+	rejected := insertGame(t, fixture.db, "Permanent rejection")
+	missing := insertGame(t, fixture.db, "Missing provider game")
+	running := insertGame(t, fixture.db, "In progress")
+	executeSQL(t, fixture.db, `INSERT INTO catalog.refresh_jobs(game_id,state,attempts,last_error_code,next_run_at) VALUES
+		($1,'failed',5,'provider_unavailable',now()-interval '1 hour'),
+		($2,'failed',1,'provider_rejected',now()-interval '1 hour'),
+		($3,'failed',1,'provider_missing',now()-interval '1 hour')`, transient, rejected, missing)
+	executeSQL(t, fixture.db, `INSERT INTO catalog.refresh_jobs(game_id,state,attempts,next_run_at,lease_token,lease_until)
+		VALUES($1,'running',2,now(),gen_random_uuid(),now()+interval '1 minute')`, running)
+	applyMigrations(t, fixture.config, nil)
+	assertSQLTrue(t, fixture.db, `SELECT state='pending' AND attempts=0 AND last_error_code='provider_unavailable'
+		AND next_run_at>=now()+interval '59 minutes' FROM catalog.refresh_jobs WHERE game_id=$1`, transient)
+	assertSQLTrue(t, fixture.db, `SELECT count(*)=2 AND bool_and(state='failed') FROM catalog.refresh_jobs WHERE game_id IN ($1,$2)`, rejected, missing)
+	assertSQLTrue(t, fixture.db, `SELECT state='running' AND attempts=2 AND lease_token IS NOT NULL AND lease_until>now() FROM catalog.refresh_jobs WHERE game_id=$1`, running)
+	// Reapplying migrations must leave an already resumed retry round alone.
+	executeSQL(t, fixture.db, `UPDATE catalog.refresh_jobs SET attempts=2 WHERE game_id=$1`, transient)
+	applyMigrations(t, fixture.config, nil)
+	assertSQLTrue(t, fixture.db, `SELECT state='pending' AND attempts=2 FROM catalog.refresh_jobs WHERE game_id=$1`, transient)
 }

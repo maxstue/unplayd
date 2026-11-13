@@ -25,7 +25,7 @@ class ApplicationTest {
     @Test
     fun `liveness returns service identity and a generated request ID`() =
         testApplication {
-            application { module(auth, TestUsers(), auth.verifier(tokens.provider)) }
+            application { testModule(auth, TestUsers(), auth.verifier(tokens.provider)) }
             val response = client.get("/health/live")
             val body = Json.parseToJsonElement(response.bodyAsText()).jsonObject
             assertEquals(HttpStatusCode.OK, response.status)
@@ -37,7 +37,7 @@ class ApplicationTest {
     @Test
     fun `valid request IDs are preserved including the length limit`() =
         testApplication {
-            application { module(auth, TestUsers(), auth.verifier(tokens.provider)) }
+            application { testModule(auth, TestUsers(), auth.verifier(tokens.provider)) }
             listOf("trace_123-ABC", "a".repeat(64)).forEach { id ->
                 val response = client.get("/health/live") { header("X-Request-ID", id) }
                 assertEquals(HttpStatusCode.OK, response.status)
@@ -48,7 +48,7 @@ class ApplicationTest {
     @Test
     fun `invalid request IDs are replaced`() =
         testApplication {
-            application { module(auth, TestUsers(), auth.verifier(tokens.provider)) }
+            application { testModule(auth, TestUsers(), auth.verifier(tokens.provider)) }
             listOf("invalid request id", "a".repeat(65)).forEach { id ->
                 val response = client.get("/health/live") { header("X-Request-ID", id) }
                 assertEquals(HttpStatusCode.OK, response.status)

@@ -14,14 +14,17 @@ var errLeaseLost = errors.New("refresh lease lost")
 // RefreshPolicy bounds durable background work independently of HTTP requests.
 type RefreshPolicy struct {
 	Poll, Timeout, Lease, Interval, Retry time.Duration
-	MaxAttempts                           int
+	// Recovery separates retry rounds after MaxAttempts transient failures.
+	Recovery time.Duration
+	// MaxAttempts bounds a retry round; transient failures remain recoverable.
+	MaxAttempts int
 }
 
 func DefaultRefreshPolicy() RefreshPolicy {
-	return RefreshPolicy{5 * time.Second, time.Minute, 90 * time.Second, 24 * time.Hour, time.Minute, 5}
+	return RefreshPolicy{Poll: 5 * time.Second, Timeout: time.Minute, Lease: 90 * time.Second, Interval: 24 * time.Hour, Retry: time.Minute, Recovery: time.Hour, MaxAttempts: 5}
 }
 func (p RefreshPolicy) valid() bool {
-	return p.Poll > 0 && p.Timeout > 0 && p.Lease > p.Timeout && p.Interval > 0 && p.Retry > 0 && p.MaxAttempts > 0
+	return p.Poll > 0 && p.Timeout > 0 && p.Lease > p.Timeout && p.Interval > 0 && p.Retry > 0 && p.Recovery >= p.Retry && p.MaxAttempts > 0
 }
 
 type refreshJob struct {
@@ -35,11 +38,12 @@ func (s *Store) claimRefresh(ctx context.Context, p RefreshPolicy) (refreshJob, 
  SELECT j.game_id FROM catalog.refresh_jobs j JOIN catalog.games g ON g.id=j.game_id
  WHERE g.is_active AND ((j.state='pending' AND j.next_run_at<=now()) OR (j.state='running' AND j.lease_until<=now()))
  ORDER BY j.next_run_at, j.game_id FOR UPDATE OF j SKIP LOCKED LIMIT 1
- ) UPDATE catalog.refresh_jobs j SET state='running', attempts=j.attempts+1,
+ ) UPDATE catalog.refresh_jobs j SET state='running',
+ attempts=CASE WHEN j.attempts >= $2 THEN 1 ELSE j.attempts+1 END,
  lease_token=gen_random_uuid(), lease_until=now()+make_interval(secs=>$1), last_attempt_at=now()
  FROM candidate c WHERE j.game_id=c.game_id
  RETURNING j.game_id, j.lease_token, j.attempts,
- (SELECT external_id FROM catalog.external_game_ids WHERE game_id=j.game_id AND source='igdb' ORDER BY external_id LIMIT 1)`, p.Lease.Seconds()).Scan(&j.ID, &j.Token, &j.Attempts, &j.ExternalID)
+ (SELECT external_id FROM catalog.external_game_ids WHERE game_id=j.game_id AND source='igdb' ORDER BY external_id LIMIT 1)`, p.Lease.Seconds(), p.MaxAttempts).Scan(&j.ID, &j.Token, &j.Attempts, &j.ExternalID)
 	return j, err
 }
 
@@ -143,8 +147,11 @@ func (p RefreshPolicy) outcome(ctx context.Context, j refreshJob, err error, rej
 	if err == nil {
 		return refreshOutcome{next: jitter(p.Interval)}
 	}
-	result := refreshOutcome{code: "provider_unavailable", terminal: j.Attempts >= p.MaxAttempts,
+	result := refreshOutcome{code: "provider_unavailable",
 		next: jitter(min(p.Retry*time.Duration(1<<min(j.Attempts-1, 10)), time.Hour))}
+	if j.Attempts >= p.MaxAttempts {
+		result.next = jitter(p.Recovery)
+	}
 	if errors.Is(err, ErrNotFound) {
 		result.code = "provider_missing"
 		result.terminal = true
@@ -174,7 +181,7 @@ func (s *Store) runNextRefresh(ctx context.Context, importer *Importer, p Refres
 	}
 	started := time.Now()
 	jobCtx, cancel := context.WithTimeout(ctx, p.Timeout)
-	games, fetchErr := importer.fetchRefresh(jobCtx, j, p.MaxAttempts)
+	games, fetchErr := importer.fetchRefresh(jobCtx, j)
 	cancel()
 	outcome := p.outcome(ctx, j, fetchErr, rejected, credentials)
 	if fetchErr != nil {
@@ -193,10 +200,7 @@ func (s *Store) runNextRefresh(ctx context.Context, importer *Importer, p Refres
 }
 
 // fetchRefresh performs no writes: only the current lease owner may commit results.
-func (i *Importer) fetchRefresh(ctx context.Context, j refreshJob, maxAttempts int) ([]SourceGame, error) {
-	if j.Attempts > maxAttempts {
-		return nil, errors.New("attempt limit")
-	}
+func (i *Importer) fetchRefresh(ctx context.Context, j refreshJob) ([]SourceGame, error) {
 	found, err := i.source.Games(ctx, []string{j.ExternalID})
 	if err != nil {
 		return nil, err

@@ -4,6 +4,18 @@ const props = defineProps<{ mode: "sign-in" | "sign-up" }>();
 const incoming = useSignIn();
 const outgoing = useSignUp();
 const { isSignedIn } = useAuth();
+let navigation: Promise<void> | undefined;
+function completeNavigation() {
+  navigation ??= Promise.resolve()
+    .then(async () => {
+      await navigateTo("/dashboard");
+    })
+    .catch((cause: unknown) => {
+      navigation = undefined;
+      throw cause;
+    });
+  return navigation;
+}
 const {
   step,
   email,
@@ -31,15 +43,13 @@ const {
     setActive: incoming.setActive,
     isLoaded: computed(() => incoming.isLoaded.value && outgoing.isLoaded.value),
   },
-  async () => {
-    await navigateTo("/dashboard");
-  },
+  completeNavigation,
 );
 watch(
   isSignedIn,
   (signedIn) => {
-    if (signedIn) {
-      void navigateTo("/dashboard");
+    if (signedIn && !busy.value && step.value !== "blocked") {
+      void completeNavigation();
     }
   },
   { immediate: true },

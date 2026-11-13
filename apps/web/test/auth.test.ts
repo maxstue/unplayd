@@ -54,6 +54,7 @@ function currentUserApp(session: Session | ((event: H3Event) => Session), fetche
 }
 
 beforeEach(() => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.stubGlobal(
     "fetch",
     vi.fn<typeof fetch>().mockRejectedValue(new Error("Unexpected external fetch")),
@@ -62,6 +63,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("requireSession through H3", () => {
@@ -189,6 +191,55 @@ describe("requireSession through H3", () => {
 });
 
 describe("currentUser BFF through H3", () => {
+  it("cancels an in-flight /me request without logging a client disconnect as an upstream failure", async () => {
+    const controller = new AbortController();
+    let started!: () => void;
+    const start = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(
+      (_input, init) =>
+        new Promise((_resolve, reject) => {
+          started();
+          init!.signal!.addEventListener("abort", () => reject(new Error("private disconnect")), {
+            once: true,
+          });
+        }),
+    );
+    const pending = currentUserApp(
+      clerkSession(),
+      fetcher,
+    )(new Request(`${config.appOrigin}/api/me`, { signal: controller.signal }));
+    await start;
+    controller.abort();
+    const response = await pending;
+    expect(response.status).toBe(503);
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("does not call /me if the browser leaves while its session token is loading", async () => {
+    const controller = new AbortController();
+    const session = clerkSession();
+    let release!: (token: string) => void;
+    session.getToken.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    const fetcher = vi.fn<typeof fetch>();
+    const pending = currentUserApp(
+      session,
+      fetcher,
+    )(new Request(`${config.appOrigin}/api/me`, { signal: controller.signal }));
+    await Promise.resolve();
+    controller.abort();
+    release(randomUUID());
+    const response = await pending;
+    expect(response.status).toBe(503);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
   it("forwards only the server session token and correlation ID to Ktor /me", async () => {
     const session = clerkSession();
     const token = await session.getToken();
@@ -277,7 +328,7 @@ describe("currentUser BFF through H3", () => {
     const body = await response.text();
     expect(JSON.parse(body)).toMatchObject({
       statusCode: 503,
-      statusMessage: "User service unavailable",
+      statusMessage: "Service unavailable",
     });
     expect(body).not.toContain(privateDetail);
     expect(fetcher).not.toHaveBeenCalled();
@@ -309,7 +360,7 @@ describe("currentUser BFF through H3", () => {
       const body = await response.text();
       expect(JSON.parse(body)).toMatchObject({
         statusCode: 503,
-        statusMessage: "User service unavailable",
+        statusMessage: "Service unavailable",
       });
       expect(body).not.toContain(detail);
     },
@@ -340,7 +391,7 @@ describe("currentUser BFF through H3", () => {
     const body = await response.text();
     expect(JSON.parse(body)).toMatchObject({
       statusCode: expected,
-      statusMessage: expected === 401 ? "Unauthorized" : "User service unavailable",
+      statusMessage: expected === 401 ? "Unauthorized" : "Service unavailable",
     });
     expect(body).not.toContain(detail);
     expect(body).not.toContain(config.userApiUrl);
@@ -366,7 +417,7 @@ describe("currentUser BFF through H3", () => {
     const body = await response.text();
     expect(JSON.parse(body)).toMatchObject({
       statusCode: 503,
-      statusMessage: "User service unavailable",
+      statusMessage: "Service unavailable",
     });
     expect(body).not.toContain(detail);
   });

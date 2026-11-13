@@ -30,7 +30,7 @@ jobs:
   web:
     name: Web
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,6 +41,7 @@ jobs:
           cache: true
           run-install: false
       - run: vp install --frozen-lockfile
+      - run: vp exec --filter @unplayd/web playwright install --with-deps chromium
       - run: vp run check:web
       - run: vp run build:web
       - run: vp run test:web

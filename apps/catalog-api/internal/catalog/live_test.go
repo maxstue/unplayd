@@ -1,9 +1,11 @@
 package catalog_test
 
 import (
+	"log/slog"
 	"os"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/maxstue/unplayd/apps/catalog-api/internal/catalog"
 	"github.com/maxstue/unplayd/apps/catalog-api/internal/igdb"
@@ -26,7 +28,11 @@ func TestLiveIGDBBundling(t *testing.T) {
 		t.Fatal(err)
 	}
 	store, _ := catalog.NewTestStore(t)
-	importer := catalog.NewImporter(client, store)
+	policy := catalog.DefaultSearchPolicy()
+	policy.Wait = 30 * time.Second
+	policy.RefreshTimeout = policy.Wait
+	service := catalog.NewService(store, catalog.NewImporter(client, store), policy, slog.New(slog.DiscardHandler))
+	t.Cleanup(func() { service.Stop(); service.Wait() })
 	for _, tc := range []struct {
 		query, title string
 		kinds        []catalog.Kind
@@ -36,13 +42,13 @@ func TestLiveIGDBBundling(t *testing.T) {
 		{"elden ring", "Elden Ring", []catalog.Kind{catalog.KindEdition, catalog.KindExpansion}},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
-			hits := liveSearch(t, importer, tc.query)
+			hits := liveSearch(t, service, tc.query)
 			assertBundled(t, hits)
 			assertMainHit(t, hits, tc.title, tc.kinds)
 		})
 	}
 	t.Run("resident evil 2", func(t *testing.T) {
-		hits := liveSearch(t, importer, "resident evil 2")
+		hits := liveSearch(t, service, "resident evil 2")
 		assertBundled(t, hits)
 		if !slices.ContainsFunc(hitsTitled(hits, "Resident Evil 2"), func(hit catalog.SearchHit) bool {
 			return slices.ContainsFunc(hit.MatchedChildren, func(child catalog.Game) bool { return child.Kind == catalog.KindRemake })
@@ -58,14 +64,15 @@ func TestLiveIGDBBundling(t *testing.T) {
 		{catalog.CategoryDLC, []catalog.Kind{catalog.KindDLC, catalog.KindPack, catalog.KindUpdate}},
 	} {
 		t.Run("witcher 3 "+string(tc.category), func(t *testing.T) {
-			assertFlatChildren(t, liveSearch(t, importer, "witcher 3", tc.category), tc.kinds)
+			assertFlatChildren(t, liveSearch(t, service, "witcher 3", tc.category), tc.kinds)
 		})
 	}
 }
 
-func liveSearch(t *testing.T, importer *catalog.Importer, query string, categories ...catalog.Category) []catalog.SearchHit {
+func liveSearch(t *testing.T, service *catalog.Service, query string, categories ...catalog.Category) []catalog.SearchHit {
 	t.Helper()
-	hits, err := importer.Search(t.Context(), query, categories, 50)
+	page, err := service.Search(t.Context(), catalog.SearchRequest{Query: query, Categories: categories, Limit: 50})
+	hits := page.Hits
 	if err != nil {
 		t.Fatal(err)
 	}

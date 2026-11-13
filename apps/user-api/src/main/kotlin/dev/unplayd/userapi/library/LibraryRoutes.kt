@@ -17,33 +17,38 @@ import io.ktor.server.routing.put
 
 fun Route.libraryRoutes(
     users: UserStore,
-    service: LibraryService?,
+    service: LibraryService,
 ) {
     suspend fun ApplicationCall.userId() = users.resolve(requireNotNull(principal<JWTPrincipal>()).subject!!).id
 
-    fun library() = checkNotNull(service) { "Library service is not configured" }
-
+    get("/library/overview") { call.respond(service.overview(call.userId())) }
+    get("/library/platforms") { call.respond(service.platforms(call.userId())) }
+    get("/library/{gameId}") {
+        val gameId = uuid(call.parameters["gameId"])
+        val entry = service.findEntry(call.userId(), gameId) ?: throw LibraryProblem(404, "Not found")
+        call.respond(entry)
+    }
     get("/library") {
         val query = call.request.queryParameters
         val limit = query["limit"]?.let { it.toIntOrNull() ?: throw LibraryProblem(400, "Invalid limit") } ?: 20
         val filter = LibraryFilter(query["status"], query["ownership"], query["platformId"], limit, query["cursor"])
-        call.respond(library().list(call.userId(), filter))
+        call.respond(service.list(call.userId(), filter))
     }
     post("/library") {
         val request = call.receive<AddLibraryEntry>()
         request.validate()
-        val result = library().add(call.userId(), request, requireNotNull(call.callId))
+        val result = service.add(call.userId(), request, requireNotNull(call.callId))
         call.respond(if (result.created) HttpStatusCode.Created else HttpStatusCode.OK, result.entry)
     }
     put("/library/{gameId}/status") {
         val gameId = uuid(call.parameters["gameId"])
         val status = call.receive<SetStatus>().status
         if (status !in statuses) throw LibraryProblem(400, "Invalid status")
-        call.respond(library().setStatus(call.userId(), gameId, status))
+        call.respond(service.setStatus(call.userId(), gameId, status))
     }
     delete("/library/{gameId}") {
         val gameId = uuid(call.parameters["gameId"])
-        library().delete(call.userId(), gameId)
+        service.delete(call.userId(), gameId)
         call.respond(HttpStatusCode.NoContent)
     }
 }

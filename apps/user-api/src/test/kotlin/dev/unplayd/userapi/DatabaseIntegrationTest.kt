@@ -1,7 +1,6 @@
 package dev.unplayd.userapi
 
 import dev.unplayd.userapi.database.migrateDatabase
-import dev.unplayd.userapi.identity.JdbcUserStore
 import kotlinx.coroutines.runBlocking
 import java.sql.Connection
 import java.sql.SQLException
@@ -146,7 +145,9 @@ class DatabaseIntegrationTest {
                     val game = UUID.randomUUID()
                     val entry = db.addEntry(user, game)
                     db.execute("INSERT INTO user_data.game_statuses(library_entry_id,status) VALUES (?,'backlog')", entry)
-                    val store = JdbcUserStore(database.config)
+                    val store =
+                        dev.unplayd.userapi.library
+                            .JdbcLibraryStore(database.dataSource)
                     val initial = assertNotNull(store.findEntry(user, game))
 
                     db.execute("INSERT INTO user_data.favorites(library_entry_id) VALUES (?)", entry)
@@ -218,7 +219,9 @@ class DatabaseIntegrationTest {
                         db.execute("INSERT INTO user_data.ratings(library_entry_id,value) VALUES (?,8)", entry)
                         db.execute("INSERT INTO user_data.notes(library_entry_id,text) VALUES (?,'Kept for its owner')", entry)
                     }
-                    val store = JdbcUserStore(database.config)
+                    val store =
+                        dev.unplayd.userapi.library
+                            .JdbcLibraryStore(database.dataSource)
                     val before = assertNotNull(store.findEntry(second, game))
 
                     assertEquals(1, db.execute("DELETE FROM user_data.library_entries WHERE id=?", removed))

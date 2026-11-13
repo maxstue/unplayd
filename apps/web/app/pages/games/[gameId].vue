@@ -5,18 +5,13 @@ definePageMeta({ middleware: "auth", key: (route) => route.params.gameId as stri
 const route = useRoute();
 const returnTo = computed(() => libraryReturnPath(route.query.returnTo));
 const id = route.params.gameId as string;
-const {
-  data: detail,
-  status,
-  error,
-  refresh,
-} = await useLazyFetch<GameDetailView>(`/api/games/${id}`);
+const { data: detail, status, error, refresh } = useLazyFetch<GameDetailView>(`/api/games/${id}`);
 const {
   data: entry,
   status: entryStatus,
   error: entryError,
   refresh: refreshEntry,
-} = await useLazyFetch<LibraryEntryView>(`/api/library/${id}`);
+} = useLazyFetch<LibraryEntryView>(`/api/library/${id}`);
 const knownEntries = useState<Record<string, boolean>>("known-library-entries", () => ({}));
 const ownership = ref<"owned" | "wishlist" | "subscription">("owned");
 const platformId = ref("");

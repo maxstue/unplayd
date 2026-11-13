@@ -6,19 +6,19 @@ const {
   data: overview,
   error: overviewError,
   refresh: refreshOverview,
-} = await useLazyFetch<LibraryOverview>("/api/library/overview");
+} = useLazyFetch<LibraryOverview>("/api/library/overview");
 const {
   data: playing,
   status,
   error,
   refresh,
-} = await useLazyFetch<LibraryPageView>("/api/library", { query: { status: "playing", limit: 3 } });
+} = useLazyFetch<LibraryPageView>("/api/library", { query: { status: "playing", limit: 3 } });
 const {
   data: backlog,
   status: backlogStatus,
   error: backlogError,
   refresh: refreshBacklog,
-} = await useLazyFetch<LibraryPageView>("/api/library", { query: { status: "backlog", limit: 6 } });
+} = useLazyFetch<LibraryPageView>("/api/library", { query: { status: "backlog", limit: 6 } });
 const summary = computed(() => [
   {
     label: "Spiele insgesamt",

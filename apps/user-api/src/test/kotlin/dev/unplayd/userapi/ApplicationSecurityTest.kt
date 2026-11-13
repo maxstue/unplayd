@@ -2,9 +2,9 @@ package dev.unplayd.userapi
 
 import com.auth0.jwt.algorithms.Algorithm
 import dev.unplayd.userapi.auth.AuthConfig
-import dev.unplayd.userapi.identity.GameSnapshot
-import dev.unplayd.userapi.identity.LibraryEntry
 import dev.unplayd.userapi.identity.LocalUser
+import dev.unplayd.userapi.library.GameSnapshot
+import dev.unplayd.userapi.library.LibraryEntry
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.setBody
@@ -37,7 +37,7 @@ class ApplicationSecurityTest {
     fun `valid sessions without audience resolve only the token subject`() =
         testApplication {
             val users = TestUsers(listOf(first, second))
-            application { module(auth, users, auth.verifier(tokens.provider)) }
+            application { testModule(auth, users, auth.verifier(tokens.provider)) }
             listOf(first, second).forEach { user ->
                 val other = if (user == first) second else first
                 listOf(emptyMap(), mapOf("sts" to "active")).forEach { claims ->
@@ -63,7 +63,7 @@ class ApplicationSecurityTest {
     fun `invalid JWTs fail before user resolution and never reflect tokens`() =
         testApplication {
             val users = TestUsers()
-            application { module(auth, users, auth.verifier(tokens.provider)) }
+            application { testModule(auth, users, auth.verifier(tokens.provider)) }
             val now = Instant.now().epochSecond
             val invalidClaims =
                 listOf(
@@ -110,7 +110,7 @@ class ApplicationSecurityTest {
     fun `missing duplicate and malformed authorization headers are rejected`() =
         testApplication {
             val users = TestUsers(listOf(first))
-            application { module(auth, users, auth.verifier(tokens.provider)) }
+            application { testModule(auth, users, auth.verifier(tokens.provider)) }
             val token = tokens.token(first.clerkSubject)
             listOf(
                 emptyList(),
@@ -144,7 +144,7 @@ class ApplicationSecurityTest {
                         (second.id to secondGame) to secondEntry,
                     ),
                 )
-            application { module(auth, users, auth.verifier(tokens.provider)) }
+            application { testModule(auth, users, auth.verifier(tokens.provider)) }
             listOf(Triple(first, firstGame, firstEntry), Triple(second, secondGame, secondEntry)).forEach { (user, game, expected) ->
                 val other = if (user == first) second else first
                 val token = tokens.token(user.clerkSubject)
@@ -180,7 +180,7 @@ class ApplicationSecurityTest {
     fun `protected library invalid IDs and unknown routes remain authenticated and private`() =
         testApplication {
             val users = TestUsers(listOf(first))
-            application { module(auth, users, auth.verifier(tokens.provider)) }
+            application { testModule(auth, users, auth.verifier(tokens.provider)) }
             val token = tokens.token(first.clerkSubject)
             listOf("/library/${UUID.randomUUID()}", "/library/invalid", "/unknown").forEach { path ->
                 val response = client.get(path)
@@ -200,7 +200,7 @@ class ApplicationSecurityTest {
         testApplication {
             val token = tokens.token(first.clerkSubject)
             val users = TestUsers(failure = IllegalStateException("database failure $token"))
-            application { module(auth, users, auth.verifier(tokens.provider)) }
+            application { testModule(auth, users, auth.verifier(tokens.provider)) }
             val response =
                 client.get("/me") {
                     header(HttpHeaders.Authorization, "Bearer $token")

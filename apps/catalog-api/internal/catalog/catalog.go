@@ -114,10 +114,6 @@ func newSearchFilter(categories []Category) (SearchFilter, error) {
 
 func (f SearchFilter) empty() bool { return !f.Parents && len(f.Kinds) == 0 }
 
-func (f SearchFilter) matches(game Game) bool {
-	return f.empty() || f.Parents && game.Parent == nil || slices.Contains(f.Kinds, game.Kind)
-}
-
 // SourcePlatform is a platform as reported by an external provider.
 type SourcePlatform struct {
 	ExternalID string
@@ -206,44 +202,6 @@ func NewImporter(source Source, store *Store) *Importer {
 	return &Importer{source: source, store: store}
 }
 
-// Search queries the provider by title and upserts the matches with their
-// relatives. Without categories every parent appears once, carrying the
-// matched children; with categories the matches form a flat list.
-func (i *Importer) Search(ctx context.Context, query string, categories []Category, limit int) ([]SearchHit, error) {
-	query, err := validateQuery(query)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateLimit(limit); err != nil {
-		return nil, err
-	}
-	filter, err := newSearchFilter(categories)
-	if err != nil {
-		return nil, err
-	}
-	matches, stored, err := i.fetch(ctx, query, filter, limit)
-	if err != nil {
-		return nil, err
-	}
-	hits := bundle(matches, stored, filter)
-	var parentIDs []string
-	for _, hit := range hits {
-		if hit.Game.Parent == nil {
-			parentIDs = append(parentIDs, hit.Game.ID)
-		}
-	}
-	counts, err := i.store.ChildCounts(ctx, parentIDs)
-	if err != nil {
-		return nil, err
-	}
-	for index := range hits {
-		if hit := &hits[index]; hit.Game.Parent == nil {
-			hit.ChildCounts = counts[hit.Game.ID]
-		}
-	}
-	return hits, nil
-}
-
 // validateQuery returns query with surrounding whitespace removed and inner
 // whitespace collapsed, or an error when its length is out of bounds.
 func validateQuery(query string) (string, error) {
@@ -262,62 +220,13 @@ func validateLimit(limit int) error {
 }
 
 // fetch searches the provider and stores the matches with their relatives.
-// It returns the stored matches in provider order plus every stored game.
-func (i *Importer) fetch(ctx context.Context, query string, filter SearchFilter, limit int) ([]Game, []Game, error) {
+// It returns the stored matches in provider order.
+func (i *Importer) fetch(ctx context.Context, query string, filter SearchFilter, limit int) ([]Game, error) {
 	found, err := i.source.Search(ctx, query, filter, limit)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	return i.save(ctx, found)
-}
-
-// bundle turns matches into hits: with a filter as a flat list of matching
-// games, otherwise one hit per parent in order of its first match.
-func bundle(matches, stored []Game, filter SearchFilter) []SearchHit {
-	if !filter.empty() {
-		return flatHits(matches, filter)
-	}
-	byID := make(map[string]Game, len(stored))
-	for _, game := range stored {
-		byID[game.ID] = game
-	}
-	hits := []SearchHit{}
-	index := map[string]int{}
-	for _, game := range matches {
-		parent, isChild := parentOf(game, byID)
-		position, ok := index[parent.ID]
-		if !ok {
-			position = len(hits)
-			index[parent.ID] = position
-			hits = append(hits, newHit(parent))
-		}
-		if isChild {
-			hits[position].MatchedChildren = append(hits[position].MatchedChildren, game)
-		}
-	}
-	return hits
-}
-
-func flatHits(matches []Game, filter SearchFilter) []SearchHit {
-	hits := []SearchHit{}
-	for _, game := range matches {
-		if filter.matches(game) {
-			hits = append(hits, newHit(game))
-		}
-	}
-	return hits
-}
-
-// parentOf returns the stored parent of game, or game itself when it has none
-// in the batch.
-func parentOf(game Game, byID map[string]Game) (Game, bool) {
-	if game.Parent == nil {
-		return game, false
-	}
-	if parent, ok := byID[game.Parent.ID]; ok {
-		return parent, true
-	}
-	return game, false
 }
 
 func newHit(game Game) SearchHit {
@@ -334,22 +243,21 @@ func (i *Importer) Import(ctx context.Context, externalIDs []string) ([]Game, er
 	if err != nil {
 		return nil, err
 	}
-	matches, _, err := i.save(ctx, found)
-	return matches, err
+	return i.save(ctx, found)
 }
 
 // save upserts found together with its relatives in one transaction and
-// returns the stored matches in input order plus every stored game.
-func (i *Importer) save(ctx context.Context, found []SourceGame) ([]Game, []Game, error) {
+// returns the stored matches in input order.
+func (i *Importer) save(ctx context.Context, found []SourceGame) ([]Game, error) {
 	batch, err := i.withRelatives(ctx, found)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	stored, err := i.store.Upsert(ctx, batch.games)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return stored[:batch.matches], stored, nil
+	return stored[:batch.matches], nil
 }
 
 // sourceBatch is a duplicate-free list of source games; the first matches

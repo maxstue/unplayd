@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -416,7 +417,7 @@ func TestBatchClassifiesEveryRequestedIDOnce(t *testing.T) {
 
 func TestDefaultSearchPolicyFitsTheServiceClientBudget(t *testing.T) {
 	policy := DefaultSearchPolicy()
-	if policy.Wait >= 3*time.Second || policy.FreshFor != 24*time.Hour || policy.RefreshTimeout <= policy.Wait || policy.Cooldown <= 0 {
+	if policy.Wait >= 3*time.Second || policy.FreshFor != 24*time.Hour || policy.RefreshTimeout <= policy.Wait || policy.Cooldown <= 0 || policy.MaxConcurrentRefreshes < 1 {
 		t.Fatalf("policy = %+v", policy)
 	}
 }
@@ -454,5 +455,90 @@ func TestTitleSearchUsesTheTrigramIndex(t *testing.T) {
 	}
 	if !strings.Contains(plan.String(), "games_active_title_trgm") || !strings.Contains(plan.String(), "'%zelda%'") {
 		t.Fatalf("title search does not use the trigram index:\n%s", plan.String())
+	}
+}
+
+func TestSearchAdmissionKeepsStoredGamesReadable(t *testing.T) {
+	store, _ := newTestStore(t)
+	upsertOne(t, store, zelda)
+	source := &blockingSource{fakeSource: &fakeSource{}, release: make(chan struct{})}
+	policy := testPolicy
+	policy.MaxConcurrentRefreshes = 1
+	service := newTestService(store, source, policy)
+	t.Cleanup(func() { service.Stop(); service.Wait() })
+	query, err := newLocalQuery(SearchRequest{Query: "occupied", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.start(t.Context(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined, err := service.start(t.Context(), query)
+	if err != nil || joined != first {
+		t.Fatalf("same query did not join at capacity: %v", err)
+	}
+	assertTitles(t, hitTitles(searchPage(t, service, SearchRequest{Query: "zelda"}).Hits), zelda.Title)
+	_, err = service.Search(t.Context(), SearchRequest{Query: "missing", Limit: 20})
+	assertErrorIs(t, err, ErrUnavailable)
+	service.mu.Lock()
+	active := len(service.inflight)
+	service.mu.Unlock()
+	if active != 1 {
+		t.Fatalf("active searches=%d, want one", active)
+	}
+	close(source.release)
+	service.Wait()
+	// Successful completion releases admission for a different query.
+	searchPage(t, service, SearchRequest{Query: "available"})
+	if source.searches.Load() != 2 {
+		t.Fatalf("provider searches=%d, want 2", source.searches.Load())
+	}
+}
+
+// cancelOnlySearchSource avoids storage work and holds every admitted search
+// until Stop cancels it, exposing the bound under concurrent unique queries.
+type cancelOnlySearchSource struct{ Source }
+
+func (cancelOnlySearchSource) Search(ctx context.Context, _ string, _ SearchFilter, _ int) ([]SourceGame, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestConcurrentDistinctSearchAdmissionIsBounded(t *testing.T) {
+	policy := DefaultSearchPolicy()
+	policy.MaxConcurrentRefreshes = 3
+	service := newTestService(nil, cancelOnlySearchSource{}, policy)
+	t.Cleanup(func() { service.Stop(); service.Wait() })
+	results := make(chan error, 100)
+	var calls sync.WaitGroup
+	for index := range 100 {
+		calls.Go(func() {
+			query, err := newLocalQuery(SearchRequest{Query: fmt.Sprintf("game %d", index), Limit: 20})
+			if err == nil {
+				_, err = service.start(t.Context(), query)
+			}
+			results <- err
+		})
+	}
+	calls.Wait()
+	close(results)
+	admitted := 0
+	for err := range results {
+		if err == nil {
+			admitted++
+		} else if !errors.Is(err, errRefreshCapacity) {
+			t.Fatalf("unexpected admission failure: %v", err)
+		}
+	}
+	if admitted != policy.MaxConcurrentRefreshes {
+		t.Fatalf("admitted=%d, want %d", admitted, policy.MaxConcurrentRefreshes)
+	}
+	service.Stop()
+	service.Wait()
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	if len(service.inflight) != 0 {
+		t.Fatal("Stop/Wait left background searches running")
 	}
 }

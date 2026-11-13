@@ -1,7 +1,8 @@
 import { setResponseStatus, type H3Event } from "h3";
 import { withServices, upstream, publicError } from "../clients/request";
 import type { ServicesConfig } from "../clients/config";
-import { statusLabels, type LibraryOverview } from "../../shared/library";
+import { statusLabels } from "../../shared/library";
+import type { components as Catalog } from "../clients/generated/catalog-api";
 import { enrichEntries } from "./library";
 import {
   addEntryBody,
@@ -20,7 +21,12 @@ export function searchGames(event: H3Event, config: ServicesConfig, fetcher?: ty
     async (s) => {
       const query = catalogQuery(event);
       return (
-        await upstream(() => s.catalog.GET("/games", { params: { query } }), "catalog", s.requestId)
+        await upstream(
+          () => s.catalog.GET("/games", { params: { query } }),
+          "catalog",
+          s.requestId,
+          { signal: s.signal },
+        )
       ).data;
     },
     fetcher,
@@ -37,6 +43,7 @@ export function getGame(event: H3Event, config: ServicesConfig, fetcher?: typeof
           () => s.catalog.GET("/games/{gameId}", { params: { path: { gameId: id } } }),
           "catalog",
           s.requestId,
+          { signal: s.signal },
         )
       ).data;
     },
@@ -54,6 +61,7 @@ export function suggestGames(event: H3Event, config: ServicesConfig, fetcher?: t
           () => s.catalog.GET("/games/suggestions", { params: { query } }),
           "catalog",
           s.requestId,
+          { signal: s.signal },
         )
       ).data;
     },
@@ -67,7 +75,9 @@ export function batchGames(event: H3Event, config: ServicesConfig, fetcher?: typ
     async (s) => {
       const body = await batchBody(event);
       return (
-        await upstream(() => s.catalog.POST("/games/batch", { body }), "catalog", s.requestId)
+        await upstream(() => s.catalog.POST("/games/batch", { body }), "catalog", s.requestId, {
+          signal: s.signal,
+        })
       ).data;
     },
     fetcher,
@@ -87,6 +97,7 @@ export function listLibrary(event: H3Event, config: ServicesConfig, fetcher?: ty
             }),
           "user",
           s.requestId,
+          { signal: s.signal },
         )
       ).data;
       return { ...(await enrichEntries(page.items, s)), nextCursor: page.nextCursor };
@@ -108,6 +119,7 @@ export function getLibraryEntry(event: H3Event, config: ServicesConfig, fetcher?
             }),
           "user",
           s.requestId,
+          { signal: s.signal },
         )
       ).data;
       return (await enrichEntries([entry], s)).items[0];
@@ -124,41 +136,49 @@ export function listLibraryPlatforms(
     event,
     config,
     async (s) => {
-      const platforms = new Map<string, string>();
-      const seen = new Set<string>();
-      let cursor: string | undefined;
-      do {
-        const page = (
-          await upstream(
-            () => s.user.GET("/library", { params: { query: { limit: 50, cursor } } }),
-            "user",
-            s.requestId,
-          )
-        ).data;
-        const enriched = await enrichEntries(
-          page.items.filter((entry) => entry.platformId && !platforms.has(entry.platformId)),
-          s,
-        );
-        for (const entry of enriched.items) {
-          if (!entry.platformId) {
-            continue;
+      const { items } = (
+        await upstream(() => s.user.GET("/library/platforms"), "user", s.requestId, {
+          signal: s.signal,
+        })
+      ).data;
+      if (!Array.isArray(items)) {
+        throw publicError(503, s.requestId);
+      }
+      const names = new Map<string, string>();
+      const ids = [...new Set(items.map((item) => item.gameId))];
+      // Only representative games are loaded, in the catalog's bounded batches.
+      for (let offset = 0; offset < ids.length; offset += 100) {
+        let batch: Catalog["schemas"]["GameBatchResponse"];
+        try {
+          batch = (
+            await upstream(
+              () =>
+                s.catalog.POST("/games/batch", {
+                  body: { gameIds: ids.slice(offset, offset + 100) },
+                }),
+              "catalog",
+              s.requestId,
+              { signal: s.signal },
+            )
+          ).data;
+        } catch {
+          s.signal.throwIfAborted();
+          break;
+        }
+        if (!Array.isArray(batch.items)) {
+          break;
+        }
+        for (const game of batch.items) {
+          for (const platform of game.platforms) {
+            names.set(platform.id, platform.name);
           }
-          platforms.set(
-            entry.platformId,
-            entry.game?.platforms.find((p) => p.id === entry.platformId)?.name ??
-              "Plattform nicht verfügbar",
-          );
         }
-        cursor = page.nextCursor ?? undefined;
-        if (cursor && seen.has(cursor)) {
-          throw publicError(503, s.requestId);
-        }
-        if (cursor) {
-          seen.add(cursor);
-        }
-      } while (cursor);
-      return [...platforms]
-        .map(([id, name]) => ({ id, name }))
+      }
+      return items
+        .map(({ platformId }) => ({
+          id: platformId,
+          name: names.get(platformId) ?? "Plattform nicht verfügbar",
+        }))
         .sort((a, b) => a.name.localeCompare(b.name, "de"));
     },
     fetcher,
@@ -169,38 +189,22 @@ export function getLibraryOverview(event: H3Event, config: ServicesConfig, fetch
     event,
     config,
     async (s) => {
-      const result: LibraryOverview = {
-        total: 0,
-        statuses: { backlog: 0, playing: 0, paused: 0, completed: 0, dropped: 0 },
-      };
-      const seen = new Set<string>();
-      let cursor: string | undefined;
-      do {
-        const page = (
-          await upstream(
-            () => s.user.GET("/library", { params: { query: { limit: 50, cursor } } }),
-            "user",
-            s.requestId,
-          )
-        ).data;
-        if (!Array.isArray(page.items) || page.items.length > 50) {
-          throw publicError(503, s.requestId);
-        }
-        for (const entry of page.items) {
-          if (!Object.hasOwn(statusLabels, entry.status)) {
-            throw publicError(503, s.requestId);
-          }
-          result.total++;
-          result.statuses[entry.status]++;
-        }
-        cursor = page.nextCursor ?? undefined;
-        if (cursor && seen.has(cursor)) {
-          throw publicError(503, s.requestId);
-        }
-        if (cursor) {
-          seen.add(cursor);
-        }
-      } while (cursor);
+      const result = (
+        await upstream(() => s.user.GET("/library/overview"), "user", s.requestId, {
+          signal: s.signal,
+        })
+      ).data;
+      const counts = Object.keys(statusLabels).map(
+        (status) => result.statuses?.[status as keyof typeof statusLabels],
+      );
+      if (
+        !Number.isSafeInteger(result.total) ||
+        result.total < 0 ||
+        counts.some((count) => !Number.isSafeInteger(count) || count < 0) ||
+        counts.reduce((sum, count) => sum + count, 0) !== result.total
+      ) {
+        throw publicError(503, s.requestId);
+      }
       return result;
     },
     fetcher,
@@ -212,7 +216,9 @@ export function addLibraryEntry(event: H3Event, config: ServicesConfig, fetcher?
     config,
     async (s) => {
       const body = await addEntryBody(event);
-      const result = await upstream(() => s.user.POST("/library", { body }), "user", s.requestId);
+      const result = await upstream(() => s.user.POST("/library", { body }), "user", s.requestId, {
+        signal: s.signal,
+      });
       setResponseStatus(event, result.status);
       return result.data;
     },
@@ -235,6 +241,7 @@ export function setLibraryStatus(event: H3Event, config: ServicesConfig, fetcher
             }),
           "user",
           s.requestId,
+          { signal: s.signal },
         )
       ).data;
     },
@@ -254,7 +261,7 @@ export function deleteLibraryEntry(event: H3Event, config: ServicesConfig, fetch
           }),
         "user",
         s.requestId,
-        true,
+        { allowEmpty: true, signal: s.signal },
       );
       setResponseStatus(event, 204);
       return null;

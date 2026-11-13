@@ -340,7 +340,7 @@ func TestRejectedTokenIsRenewedOnce(t *testing.T) {
 	t.Run("persistent rejection stops after one renewal", func(t *testing.T) {
 		fake, client := newFakeIGDB(t, respond(http.StatusUnauthorized, ""))
 		_, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{}, 1)
-		if !errors.Is(err, ErrRejected) || fake.tokenCalls.Load() != 2 || fake.gameCalls.Load() != 2 {
+		if !errors.Is(err, ErrCredentials) || fake.tokenCalls.Load() != 2 || fake.gameCalls.Load() != 2 {
 			t.Fatalf("err = %v, token calls = %d, game calls = %d", err, fake.tokenCalls.Load(), fake.gameCalls.Load())
 		}
 		assertNoSecrets(t, err, fake)
@@ -361,7 +361,7 @@ func TestTransientFailuresAreRetriedWithinBounds(t *testing.T) {
 		{"persistent server errors", respond(http.StatusServiceUnavailable, ""), maxAttempts, ErrUnavailable},
 		{"persistent rate limit", respond(http.StatusTooManyRequests, ""), maxAttempts, ErrUnavailable},
 		{"bad request is not retried", respond(http.StatusBadRequest, `{"title":"Syntax Error"}`), 1, ErrRejected},
-		{"forbidden is not retried", respond(http.StatusForbidden, ""), 1, ErrRejected},
+		{"forbidden is not retried", respond(http.StatusForbidden, ""), 1, ErrCredentials},
 		{"malformed JSON is not retried", respond(http.StatusOK, `{"not":"a list"}`), 1, ErrRejected},
 		{"oversized response is not retried", respond(http.StatusOK, "["+strings.Repeat(" ", maxResponseBytes)+"]"), 1, ErrRejected},
 	} {
@@ -370,6 +370,9 @@ func TestTransientFailuresAreRetriedWithinBounds(t *testing.T) {
 			_, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{}, 1)
 			if tc.expected == nil && err != nil || tc.expected != nil && !errors.Is(err, tc.expected) {
 				t.Fatalf("err = %v, want %v", err, tc.expected)
+			}
+			if errors.Is(err, ErrCredentials) != errors.Is(tc.expected, ErrCredentials) {
+				t.Fatalf("credential classification = %v, want %v: %v", errors.Is(err, ErrCredentials), errors.Is(tc.expected, ErrCredentials), err)
 			}
 			if fake.gameCalls.Load() != tc.calls {
 				t.Fatalf("game calls = %d, want %d", fake.gameCalls.Load(), tc.calls)
@@ -422,16 +425,22 @@ func TestTokenEndpointFailures(t *testing.T) {
 		tokenCalls int32
 		expected   error
 	}{
-		{"invalid credentials", http.StatusForbidden, `{"message":"invalid client secret"}`, 1, ErrRejected},
-		{"bad request", http.StatusBadRequest, `{"message":"invalid client"}`, 1, ErrRejected},
+		{"invalid credentials", http.StatusForbidden, `{"message":"invalid client secret"}`, 1, ErrCredentials},
+		{"invalid grant", http.StatusBadRequest, `{"message":"invalid client"}`, 1, ErrCredentials},
+		{"unauthorized", http.StatusUnauthorized, "", 1, ErrCredentials},
 		{"token service unavailable", http.StatusServiceUnavailable, "", maxAttempts, ErrUnavailable},
 		{"malformed token", http.StatusOK, `{"access_token":"","expires_in":3600}`, 1, ErrRejected},
 		{"expired token", http.StatusOK, `{"access_token":"abc","expires_in":0}`, 1, ErrRejected},
+		{"oversized token response", http.StatusOK, strings.Repeat(" ", maxResponseBytes+1), 1, ErrRejected},
+		{"unexpected token endpoint status", http.StatusNotFound, "", 1, ErrRejected},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake, client := newFakeIGDB(t, respond(http.StatusOK, `[]`))
 			fake.tokenStatus, fake.tokenBody = tc.status, tc.body
 			_, err := client.Search(t.Context(), "zelda", catalog.SearchFilter{}, 1)
+			if errors.Is(err, ErrCredentials) != errors.Is(tc.expected, ErrCredentials) {
+				t.Fatalf("credential classification = %v, want %v: %v", errors.Is(err, ErrCredentials), errors.Is(tc.expected, ErrCredentials), err)
+			}
 			if !errors.Is(err, tc.expected) || fake.tokenCalls.Load() != tc.tokenCalls || fake.gameCalls.Load() != 0 {
 				t.Fatalf("err = %v, token calls = %d, game calls = %d", err, fake.tokenCalls.Load(), fake.gameCalls.Load())
 			}

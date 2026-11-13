@@ -54,23 +54,25 @@ func (f *fakeSource) lookup(match func(SourceGame) bool) []SourceGame {
 	return found
 }
 
-func TestImporterSearchStoresProviderMatches(t *testing.T) {
+func TestSearchStoresProviderMatches(t *testing.T) {
 	store, db := newTestStore(t)
 	source := &fakeSource{games: []SourceGame{zelda}}
 	importer := NewImporter(source, store)
-	hits, err := importer.Search(t.Context(), "  zelda  ", nil, 20)
+	service := newTestService(store, source, testPolicy)
+	page, err := service.Search(t.Context(), SearchRequest{Query: "  zelda  ", Limit: 20})
+	hits := page.Hits
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.query != "zelda" || source.limit != 20 || !source.filter.empty() {
+	if source.query != "zelda" || source.limit != maxSearchLimit || !source.filter.empty() {
 		t.Fatalf("provider received query %q, filter %+v and limit %d", source.query, source.filter, source.limit)
 	}
 	if len(hits) != 1 || hits[0].Game.Title != zelda.Title || hits[0].Game.CoverURL == nil || len(hits[0].Game.Platforms) != 2 {
 		t.Fatalf("unexpected search result: %+v", hits)
 	}
 	games := []Game{hits[0].Game}
-	again, err := importer.Search(t.Context(), "zelda", nil, 20)
-	if err != nil || again[0].Game.ID != games[0].ID {
+	again, err := service.Search(t.Context(), SearchRequest{Query: "zelda", Limit: 20})
+	if err != nil || again.Hits[0].Game.ID != games[0].ID {
 		t.Fatalf("repeated search changed identity: %+v, %v", again, err)
 	}
 	assertCount(t, db, 1, `SELECT count(*) FROM catalog.games`)
@@ -93,14 +95,6 @@ func TestImporterRejectsInvalidRequestsWithoutCallingProvider(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"query too short", func() error { _, err := importer.Search(t.Context(), " z ", nil, 20); return err }},
-		{"query too long", func() error { _, err := importer.Search(t.Context(), strings.Repeat("ü", 201), nil, 20); return err }},
-		{"zero limit", func() error { _, err := importer.Search(t.Context(), "zelda", nil, 0); return err }},
-		{"limit above maximum", func() error { _, err := importer.Search(t.Context(), "zelda", nil, 51); return err }},
-		{"unknown kind filter", func() error {
-			_, err := importer.Search(t.Context(), "zelda", []Category{"sequel"}, 20)
-			return err
-		}},
 		{"empty import", func() error { _, err := importer.Import(t.Context(), nil); return err }},
 		{"import above maximum", func() error { _, err := importer.Import(t.Context(), make([]string, 101)); return err }},
 	} {
@@ -115,9 +109,11 @@ func TestImporterRejectsInvalidRequestsWithoutCallingProvider(t *testing.T) {
 	}
 }
 
-func TestImporterAcceptsQueryAndLimitBoundaries(t *testing.T) {
+func TestSearchAcceptsQueryAndLimitBoundaries(t *testing.T) {
 	source := &fakeSource{}
-	importer := NewImporter(source, NewStore(nil))
+	store, _ := newTestStore(t)
+	importer := NewImporter(source, store)
+	service := newTestService(store, source, testPolicy)
 	for _, tc := range []struct {
 		query string
 		limit int
@@ -125,7 +121,7 @@ func TestImporterAcceptsQueryAndLimitBoundaries(t *testing.T) {
 		{"ab", 1},
 		{strings.Repeat("ü", 200), 50},
 	} {
-		if games, err := importer.Search(t.Context(), tc.query, nil, tc.limit); err != nil || len(games) != 0 {
+		if page, err := service.Search(t.Context(), SearchRequest{Query: tc.query, Limit: tc.limit}); err != nil || len(page.Hits) != 0 {
 			t.Fatalf("boundary search rejected: %v", err)
 		}
 	}
@@ -137,9 +133,6 @@ func TestImporterAcceptsQueryAndLimitBoundaries(t *testing.T) {
 func TestImporterPropagatesProviderFailures(t *testing.T) {
 	failure := errors.New("provider unavailable")
 	importer := NewImporter(&fakeSource{err: failure}, nil)
-	if _, err := importer.Search(t.Context(), "zelda", nil, 20); !errors.Is(err, failure) {
-		t.Fatalf("search err = %v", err)
-	}
 	if _, err := importer.Import(t.Context(), []string{"1"}); !errors.Is(err, failure) {
 		t.Fatalf("import err = %v", err)
 	}

@@ -209,6 +209,69 @@ describe("custom password authentication", () => {
     expect(incoming.prepareSecondFactor).not.toHaveBeenCalled();
   });
 
+  it("uses separate first-factor and second-factor challenges during the same sign-in", async () => {
+    const { flow, incoming, setActive } = setup();
+    const emailAddressId = randomUUID();
+    Object.assign(incoming, {
+      status: "needs_first_factor",
+      supportedFirstFactors: [{ strategy: "password" }, { strategy: "email_code", emailAddressId }],
+      supportedSecondFactors: [{ strategy: "totp" }],
+    });
+    await flow.submit();
+    expect(flow.factors.value.map((item) => item.strategy)).toEqual(["email_code"]);
+    expect(incoming.prepareFirstFactor).toHaveBeenCalledWith({
+      strategy: "email_code",
+      emailAddressId,
+    });
+    await flow.selectFactor("totp");
+    expect(flow.factor.value?.strategy).toBe("email_code");
+
+    incoming.attemptFirstFactor.mockImplementation(async () => {
+      incoming.status = "needs_second_factor";
+      return incoming;
+    });
+    flow.code.value = "123456";
+    await flow.submit();
+    expect(incoming.attemptFirstFactor).toHaveBeenCalledWith({
+      strategy: "email_code",
+      code: "123456",
+    });
+    expect(flow.factor.value?.strategy).toBe("totp");
+    expect(flow.canResend.value).toBe(false);
+    expect(flow.code.value).toBe("");
+    expect(flow.resendIn.value).toBe(0);
+
+    incoming.attemptSecondFactor.mockImplementation(async () => signedIn(incoming));
+    flow.code.value = "654321";
+    await flow.submit();
+    expect(incoming.attemptSecondFactor).toHaveBeenCalledWith({ strategy: "totp", code: "654321" });
+    expect(setActive).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops the previous verification method when the flow is blocked or restarted", async () => {
+    vi.useFakeTimers();
+    const { flow, incoming } = setup();
+    Object.assign(incoming, {
+      status: "needs_second_factor",
+      supportedSecondFactors: [{ strategy: "email_code", emailAddressId: randomUUID() }],
+    });
+    await flow.submit();
+    expect(flow.resendIn.value).toBe(30);
+    incoming.attemptSecondFactor.mockImplementation(async () => {
+      incoming.status = "needs_protect_check";
+      return incoming;
+    });
+    await flow.submit();
+    expect(flow.step.value).toBe("blocked");
+    expect(flow.factor.value).toBeUndefined();
+    expect(flow.factors.value).toEqual([]);
+    expect(flow.resendIn.value).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    flow.restart();
+    expect(flow.step.value).toBe("credentials");
+    expect(flow.error.value).toBe("");
+  });
+
   it("sends an SMS only for a supported phone factor", async () => {
     const { flow, incoming } = setup();
     const phoneNumberId = randomUUID();
@@ -310,6 +373,55 @@ describe("custom password authentication", () => {
     resolve(signedIn(incoming));
     await request;
     expect(setActive).not.toHaveBeenCalled();
+    expect(flow.password.value).toBe("");
+  });
+
+  it("does not send a verification email when registration completes after leaving the page", async () => {
+    const { flow, outgoing, scope } = setup("sign-up");
+    let resolve!: (value: unknown) => void;
+    outgoing.create.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const request = flow.submit();
+    scope.stop();
+    outgoing.status = "missing_requirements";
+    resolve(outgoing);
+    await request;
+    expect(outgoing.prepareEmailAddressVerification).not.toHaveBeenCalled();
+    expect(flow.step.value).toBe("credentials");
+  });
+
+  it("does not restart the resend timer when a pending delivery finishes after leaving the page", async () => {
+    vi.useFakeTimers();
+    const { flow, outgoing, scope } = setup("sign-up");
+    let resolve!: () => void;
+    outgoing.prepareEmailAddressVerification.mockReturnValue(
+      new Promise<void>((done) => {
+        resolve = done;
+      }),
+    );
+    const request = flow.submit();
+    await Promise.resolve();
+    expect(outgoing.prepareEmailAddressVerification).toHaveBeenCalledTimes(1);
+    scope.stop();
+    resolve();
+    await request;
+    expect(vi.getTimerCount()).toBe(0);
+    expect(flow.resendIn.value).toBe(0);
+  });
+
+  it("stops an active resend timer and clears secrets when leaving the page", async () => {
+    vi.useFakeTimers();
+    const { flow, scope } = setup("sign-up");
+    await flow.submit();
+    flow.code.value = "123456";
+    flow.password.value = randomUUID();
+    expect(vi.getTimerCount()).toBe(1);
+    scope.stop();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(flow.code.value).toBe("");
     expect(flow.password.value).toBe("");
   });
 });

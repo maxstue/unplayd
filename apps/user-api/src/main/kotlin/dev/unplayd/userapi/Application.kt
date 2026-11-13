@@ -5,6 +5,7 @@ import dev.unplayd.userapi.auth.AuthConfig
 import dev.unplayd.userapi.catalog.CatalogConfig
 import dev.unplayd.userapi.catalog.HttpCatalogClient
 import dev.unplayd.userapi.database.DatabaseConfig
+import dev.unplayd.userapi.database.dataSource
 import dev.unplayd.userapi.database.migrateDatabase
 import dev.unplayd.userapi.identity.JdbcUserStore
 import dev.unplayd.userapi.identity.MeResponse
@@ -13,7 +14,6 @@ import dev.unplayd.userapi.library.JdbcLibraryStore
 import dev.unplayd.userapi.library.LibraryProblem
 import dev.unplayd.userapi.library.LibraryService
 import dev.unplayd.userapi.library.libraryRoutes
-import dev.unplayd.userapi.library.uuid
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.auth.HttpAuthHeader
@@ -54,11 +54,13 @@ fun main(args: Array<String>) {
     require(args.isEmpty()) { "Usage: user-api [migrate [targetVersion]]" }
     val port = System.getenv("PORT")?.let { requireNotNull(it.toIntOrNull()) { "PORT must be an integer" } } ?: 8445
     require(port in 1..65535) { "PORT must be between 1 and 65535" }
-    val users = JdbcUserStore(database)
-    val library = LibraryService(JdbcLibraryStore(database), users, HttpCatalogClient(CatalogConfig.load()))
-    embeddedServer(Netty, host = "0.0.0.0", port = port) {
-        module(users = users, library = library)
-    }.start(wait = true)
+    database.dataSource().use { dataSource ->
+        val users = JdbcUserStore(dataSource)
+        val library = LibraryService(JdbcLibraryStore(dataSource), HttpCatalogClient(CatalogConfig.load()))
+        embeddedServer(Netty, host = "0.0.0.0", port = port) {
+            module(users = users, library = library)
+        }.start(wait = true)
+    }
 }
 
 @Serializable
@@ -93,9 +95,9 @@ private fun errorResponse(
 
 fun Application.module(
     auth: AuthConfig = AuthConfig.load(),
-    users: UserStore = JdbcUserStore(DatabaseConfig.load()),
+    users: UserStore,
     verifier: JWTVerifier = auth.verifier(),
-    library: LibraryService? = null,
+    library: LibraryService,
 ) {
     install(ContentNegotiation) { json() }
     install(CallId) {
@@ -119,7 +121,13 @@ fun Application.module(
         }
         exception<Throwable> { call, cause ->
             if (cause is kotlinx.coroutines.CancellationException) throw cause
-            this@module.log.error("User API request failed: {} (requestId={})", cause::class.simpleName, call.callId)
+            this@module.log.error(
+                "User API request failed (requestId={}, type={}, sqlState={}, stack={})",
+                call.callId,
+                cause::class.simpleName,
+                (cause as? java.sql.SQLException)?.sqlState,
+                cause.stackTrace.take(8).joinToString("; "),
+            )
             call.respond(
                 HttpStatusCode.ServiceUnavailable,
                 errorResponse(message = "Service unavailable", status = 503, requestId = call.callId),
@@ -160,18 +168,6 @@ fun Application.module(
             get("/me") {
                 val user = users.resolve(requireNotNull(call.principal<JWTPrincipal>()).subject!!)
                 call.respond(MeResponse(user.id.toString(), user.clerkSubject))
-            }
-            get("/library/{gameId}") {
-                val gameId = uuid(call.parameters["gameId"])
-                val user = users.resolve(requireNotNull(call.principal<JWTPrincipal>()).subject!!)
-                val entry = users.findEntry(user.id, gameId)
-                if (entry ==
-                    null
-                ) {
-                    call.respond(HttpStatusCode.NotFound, errorResponse(message = "Not found", status = 404, requestId = call.callId))
-                } else {
-                    call.respond(entry)
-                }
             }
             route("/{path...}") {
                 handle {

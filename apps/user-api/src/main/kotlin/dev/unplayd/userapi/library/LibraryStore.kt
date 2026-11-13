@@ -1,16 +1,13 @@
 package dev.unplayd.userapi.library
 
-import dev.unplayd.userapi.database.DatabaseConfig
-import dev.unplayd.userapi.identity.GameSnapshot
-import dev.unplayd.userapi.identity.LibraryEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.sql.Connection
-import java.sql.DriverManager
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
+import javax.sql.DataSource
 
 internal const val ENTRY_SELECT = """
     SELECT e.*, s.status, (f.library_entry_id IS NOT NULL) AS favorite, r.value AS rating, n.text AS note
@@ -41,10 +38,81 @@ data class AddedEntry(
     val created: Boolean,
 )
 
-class JdbcLibraryStore(
-    private val config: DatabaseConfig,
-) {
+interface LibraryStore {
+    suspend fun findEntry(
+        userId: UUID,
+        gameId: UUID,
+    ): LibraryEntry?
+
     suspend fun list(
+        userId: UUID,
+        filter: LibraryFilter,
+    ): LibraryPage
+
+    suspend fun overview(userId: UUID): LibraryOverview
+
+    suspend fun platforms(userId: UUID): LibraryPlatforms
+
+    suspend fun add(
+        userId: UUID,
+        request: AddLibraryEntry,
+        snapshot: GameSnapshot,
+    ): AddedEntry
+
+    suspend fun setStatus(
+        userId: UUID,
+        gameId: UUID,
+        status: String,
+    ): LibraryEntry
+
+    suspend fun delete(
+        userId: UUID,
+        gameId: UUID,
+    )
+}
+
+class JdbcLibraryStore(
+    private val dataSource: DataSource,
+) : LibraryStore {
+    override suspend fun findEntry(
+        userId: UUID,
+        gameId: UUID,
+    ): LibraryEntry? =
+        read { db ->
+            db.prepareStatement("$ENTRY_SELECT WHERE e.user_id=? AND e.game_id=?").use {
+                it.setObject(1, userId)
+                it.setObject(2, gameId)
+                it.executeQuery().use { rows -> if (rows.next()) rows.entry() else null }
+            }
+        }
+
+    override suspend fun overview(userId: UUID): LibraryOverview =
+        read { db ->
+            val counts = statuses.associateWith { 0 }.toMutableMap()
+            db
+                .prepareStatement(
+                    "SELECT s.status,count(*) FROM user_data.library_entries e JOIN user_data.game_statuses s ON s.library_entry_id=e.id WHERE e.user_id=? GROUP BY s.status",
+                ).use {
+                    it.setObject(1, userId)
+                    it.executeQuery().use { rows -> while (rows.next()) counts[rows.getString(1)] = rows.getInt(2) }
+                }
+            LibraryOverview(counts.values.sum(), counts)
+        }
+
+    override suspend fun platforms(userId: UUID): LibraryPlatforms =
+        read { db ->
+            db
+                .prepareStatement(
+                    "SELECT DISTINCT ON (platform_id) platform_id,game_id FROM user_data.library_entries WHERE user_id=? AND platform_id IS NOT NULL ORDER BY platform_id,created_at DESC,id DESC",
+                ).use {
+                    it.setObject(1, userId)
+                    it.executeQuery().use { rows ->
+                        LibraryPlatforms(buildList { while (rows.next()) add(LibraryPlatform(rows.getString(1), rows.getString(2))) })
+                    }
+                }
+        }
+
+    override suspend fun list(
         userId: UUID,
         filter: LibraryFilter,
     ): LibraryPage =
@@ -89,7 +157,7 @@ class JdbcLibraryStore(
             LibraryPage(page, cursor)
         }
 
-    suspend fun add(
+    override suspend fun add(
         userId: UUID,
         request: AddLibraryEntry,
         snapshot: GameSnapshot,
@@ -122,7 +190,7 @@ class JdbcLibraryStore(
             AddedEntry(entry, created != null)
         }
 
-    suspend fun setStatus(
+    override suspend fun setStatus(
         userId: UUID,
         gameId: UUID,
         status: String,
@@ -143,7 +211,7 @@ class JdbcLibraryStore(
             requireNotNull(db.findLocked(userId, gameId))
         }
 
-    suspend fun delete(
+    override suspend fun delete(
         userId: UUID,
         gameId: UUID,
     ) = read { db ->
@@ -177,7 +245,7 @@ class JdbcLibraryStore(
 
     private suspend fun <T> read(block: (Connection) -> T): T =
         withContext(Dispatchers.IO) {
-            DriverManager.getConnection(config.url, config.user, config.password).use(block)
+            dataSource.connection.use(block)
         }
 
     private suspend fun <T> transaction(block: (Connection) -> T): T =

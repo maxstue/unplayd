@@ -12,3 +12,14 @@ Die Projektdokumentation wird zentral in Linear gepflegt:
 - [Operations](https://linear.app/justmax/document/unplayd-operations-f5e082af98c2)
 
 Alle Anwendungen liegen unter `apps/`: `web`, `user-api` und `catalog-api`.
+
+## Tests
+
+- Web-Unit-Tests (Vitest): `vp run @unplayd/web#test:unit`
+- Vue-Komponenten in Chromium (Vitest mit Playwright-Provider): `vp run @unplayd/web#test:browser`
+- Browserinteraktionen (Playwright): `vp run @unplayd/web#test:e2e`
+- Browser installieren: `pnpm --filter @unplayd/web exec playwright install chromium`
+
+Die E2E-Tests starten die echten Nuxt-Seiten und den BFF über eine separate Test-Layer. Clerk sowie User- und Catalog-HTTP-Services werden durch deterministische Test-Fixtures ersetzt. Die Kotlin- und Go-Integrationssuiten prüfen die echten Serviceimplementierungen und Produktionsmigrationen gegen PostgreSQL-Testcontainer. Test-Fixtures aktivieren keinen Auth-Bypass in der Produktionsapp.
+
+Die User API verwendet einen gemeinsamen JDBC-Pool. Optionale Pool- und Timeout-Einstellungen stehen in [.env.example](./.env.example). Bei der Auslieferung zuerst `vp run db:migrate` ausführen: Katalogmigration 8 reaktiviert früher dauerhaft fehlgeschlagene transiente Refresh-Jobs; neue transiente Fehler werden nach begrenzten Versuchsrunden automatisch erneut eingeplant.

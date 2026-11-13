@@ -32,6 +32,7 @@ export async function enrichEntries(entries: Entry[], services: RequestServices)
           }),
         "catalog",
         services.requestId,
+        { signal: services.signal },
       )
     ).data;
     if (
@@ -50,7 +51,10 @@ export async function enrichEntries(entries: Entry[], services: RequestServices)
       const game = games.get(entry.gameId) ?? null;
       const catalogStatus = getCatalogStatus(batch, entry.gameId, Boolean(game));
       return {
-        ...entry,
+        gameId: entry.gameId,
+        platformId: entry.platformId,
+        ownership: entry.ownership,
+        status: entry.status,
         game,
         display: game ? { title: game.title, coverUrl: game.coverUrl } : entry.snapshot,
         catalogStatus,

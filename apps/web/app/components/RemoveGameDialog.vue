@@ -31,6 +31,7 @@ function cancel() {
     aria-labelledby="remove-game-title"
     aria-describedby="remove-game-description"
     @cancel.prevent="cancel()"
+    @keydown.esc.prevent="cancel()"
     @click="$event.target === dialog && cancel()"
   >
     <div v-if="entry" class="remove-dialog-content">

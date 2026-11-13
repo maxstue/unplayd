@@ -39,6 +39,7 @@ export default defineConfig({
     plugins: ["typescript", "unicorn", "oxc", "vue"],
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
     rules: {
+      curly: ["error", "all"],
       "vite-plus/prefer-vite-plus-imports": "error",
       "no-restricted-imports": [
         "error",

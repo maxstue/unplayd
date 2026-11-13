@@ -140,7 +140,9 @@ export function listLibraryPlatforms(
           s,
         );
         for (const entry of enriched.items) {
-          if (!entry.platformId) continue;
+          if (!entry.platformId) {
+            continue;
+          }
           platforms.set(
             entry.platformId,
             entry.game?.platforms.find((p) => p.id === entry.platformId)?.name ??
@@ -148,8 +150,12 @@ export function listLibraryPlatforms(
           );
         }
         cursor = page.nextCursor ?? undefined;
-        if (cursor && seen.has(cursor)) throw publicError(503, s.requestId);
-        if (cursor) seen.add(cursor);
+        if (cursor && seen.has(cursor)) {
+          throw publicError(503, s.requestId);
+        }
+        if (cursor) {
+          seen.add(cursor);
+        }
       } while (cursor);
       return [...platforms]
         .map(([id, name]) => ({ id, name }))
@@ -177,16 +183,23 @@ export function getLibraryOverview(event: H3Event, config: ServicesConfig, fetch
             s.requestId,
           )
         ).data;
-        if (!Array.isArray(page.items) || page.items.length > 50)
+        if (!Array.isArray(page.items) || page.items.length > 50) {
           throw publicError(503, s.requestId);
+        }
         for (const entry of page.items) {
-          if (!Object.hasOwn(statusLabels, entry.status)) throw publicError(503, s.requestId);
+          if (!Object.hasOwn(statusLabels, entry.status)) {
+            throw publicError(503, s.requestId);
+          }
           result.total++;
           result.statuses[entry.status]++;
         }
         cursor = page.nextCursor ?? undefined;
-        if (cursor && seen.has(cursor)) throw publicError(503, s.requestId);
-        if (cursor) seen.add(cursor);
+        if (cursor && seen.has(cursor)) {
+          throw publicError(503, s.requestId);
+        }
+        if (cursor) {
+          seen.add(cursor);
+        }
       } while (cursor);
       return result;
     },

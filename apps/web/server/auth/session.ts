@@ -12,7 +12,9 @@ export function requireSession(event: H3Event, appOrigin: string) {
 }
 
 export function enforceMutationOrigin(event: H3Event, appOrigin: string) {
-  if (["GET", "HEAD", "OPTIONS"].includes(event.method)) return;
+  if (["GET", "HEAD", "OPTIONS"].includes(event.method)) {
+    return;
+  }
   if (
     getHeader(event, "origin") !== appOrigin ||
     getHeader(event, "sec-fetch-site") === "cross-site"

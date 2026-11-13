@@ -165,6 +165,53 @@ it("does not restore an obsolete page when a pending mutation fails after naviga
   expect(flow.mutationError.value).toBe("");
 });
 
+it.each(["status", "removal"] as const)(
+  "reconciles a successful %s with the current filters after an earlier filter fetch completes",
+  async (operation) => {
+    const { flow, transport, filters, initial, id } = await setup();
+    const write = deferred<unknown>();
+    if (operation === "status") {
+      transport.status.mockReturnValueOnce(write.promise);
+    } else {
+      transport.remove.mockReturnValueOnce(write.promise);
+    }
+    const save = flow.mutate(id, operation === "status" ? "playing" : undefined);
+    const beforeCommit: LibraryPageView = {
+      ...initial,
+      items: operation === "status" ? [] : initial.items,
+    };
+    transport.list.mockResolvedValueOnce(beforeCommit);
+    filters.value = operation === "status" ? { status: "playing" } : { platformId: randomUUID() };
+    await Promise.resolve();
+    expect(flow.page.value).toEqual(beforeCommit);
+    const afterCommit: LibraryPageView = {
+      ...initial,
+      items: operation === "status" ? [{ ...initial.items[0]!, status: "playing" }] : [],
+    };
+    transport.list.mockResolvedValueOnce(afterCommit);
+    write.resolve(undefined);
+    expect(await save).toBe(true);
+    expect(transport.list).toHaveBeenCalledTimes(3);
+    expect(transport.list.mock.calls.at(-1)![0]).toEqual(filters.value);
+    expect(flow.page.value).toEqual(afterCommit);
+    expect(flow.message.value).toBe("");
+    expect(flow.mutationError.value).toBe("");
+    expect(flow.pending.value).toBeNull();
+  },
+);
+
+it("does not refresh after a pending write succeeds following unmount", async () => {
+  const { flow, transport, scope, id } = await setup();
+  const write = deferred<unknown>();
+  transport.status.mockReturnValueOnce(write.promise);
+  const save = flow.mutate(id, "playing");
+  scope.stop();
+  write.resolve(undefined);
+  expect(await save).toBe(true);
+  expect(transport.list).toHaveBeenCalledTimes(1);
+  expect(flow.message.value).toBe("");
+});
+
 it("distinguishes load errors and empty results, and aborts on unmount", async () => {
   const { flow, transport, scope } = await setup();
   transport.list.mockRejectedValueOnce(new Error("offline"));
@@ -199,8 +246,9 @@ it("validates URL filters and permits only local library return destinations", (
     "/library/../sign-in",
     [path],
     undefined,
-  ])
+  ]) {
     expect(libraryReturnPath(value)).toBeNull();
+  }
 });
 
 it("waits for hydration before requesting the interactive list", async () => {

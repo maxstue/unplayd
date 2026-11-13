@@ -38,8 +38,9 @@ export async function upstream<T>(
     const allowed = service === "user" ? [400, 401, 403, 404, 409] : [400, 404, 409];
     throw publicError(allowed.includes(status) ? status : 503, requestId);
   }
-  if (!allowEmpty && (result.data === undefined || result.data === null))
+  if (!allowEmpty && (result.data === undefined || result.data === null)) {
     throw publicError(503, requestId);
+  }
   return { data: result.data as T, status: result.response.status };
 }
 
@@ -59,7 +60,9 @@ export async function withRequestSignal<T>(
   const controller = new AbortController();
   const abort = () => controller.abort();
   const close = () => {
-    if (!event.node.res.writableEnded) abort();
+    if (!event.node.res.writableEnded) {
+      abort();
+    }
   };
   event.node.req.once("aborted", abort);
   event.node.res.once("close", close);
@@ -71,8 +74,12 @@ export async function withRequestSignal<T>(
     signal.throwIfAborted();
     return await run(signal);
   } catch (error) {
-    if (error instanceof InvalidInput) throw publicError(400, event.context.requestId);
-    if (signal.aborted) throw publicError(503, event.context.requestId);
+    if (error instanceof InvalidInput) {
+      throw publicError(400, event.context.requestId);
+    }
+    if (signal.aborted) {
+      throw publicError(503, event.context.requestId);
+    }
     throw error;
   } finally {
     event.node.req.off("aborted", abort);
@@ -95,7 +102,9 @@ export async function withServices<T>(
     } catch {
       throw publicError(503, event.context.requestId);
     }
-    if (!token) throw publicError(401, event.context.requestId);
+    if (!token) {
+      throw publicError(401, event.context.requestId);
+    }
     signal.throwIfAborted();
     const common = {
       requestId: event.context.requestId,

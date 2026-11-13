@@ -241,8 +241,9 @@ it("requires a session for platform choices", async () => {
 it("aggregates a page with one batch and forwards only the appropriate credentials and filters", async () => {
   fetcher.mockImplementation(async (input) => {
     const request = input as Request;
-    if (request.url.startsWith(config.userApiUrl))
+    if (request.url.startsWith(config.userApiUrl)) {
       return Response.json({ items: [first, second], nextCursor: "next" });
+    }
     expect(await request.json()).toEqual({ gameIds: [first.gameId, second.gameId] });
     return Response.json({
       items: [game(first.gameId)],
@@ -496,8 +497,9 @@ it.each(["user", "catalog"])(
     const abort = new Promise<void>((resolve) => {
       aborted = resolve;
     });
-    if (phase === "catalog")
+    if (phase === "catalog") {
       fetcher.mockResolvedValueOnce(Response.json({ items: [first], nextCursor: null }));
+    }
     fetcher.mockImplementation(
       (_input, init) =>
         new Promise((_resolve, reject) => {
@@ -516,7 +518,9 @@ it.each(["user", "catalog"])(
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     const address = server.address();
-    if (!address || typeof address === "string") throw new Error("Missing test port");
+    if (!address || typeof address === "string") {
+      throw new Error("Missing test port");
+    }
     const controller = new AbortController();
     try {
       const pending = networkFetch(`http://127.0.0.1:${address.port}/api/library`, {

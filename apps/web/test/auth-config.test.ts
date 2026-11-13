@@ -53,7 +53,9 @@ describe("validateAuthConfig", () => {
 
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toMatch(/^NUXT_APP_ORIGIN must be/);
-    if (appOrigin) expect((error as Error).message).not.toContain(appOrigin);
+    if (appOrigin) {
+      expect((error as Error).message).not.toContain(appOrigin);
+    }
   });
 
   it.each([
@@ -87,8 +89,12 @@ describe("validateAuthConfig", () => {
     },
   ])("rejects $name and identifies only the setting", (invalid) => {
     const config = authConfig();
-    if ("publicKey" in invalid) config.public.clerk.publishableKey = invalid.publicKey;
-    if ("secretKey" in invalid) config.clerk.secretKey = invalid.secretKey;
+    if ("publicKey" in invalid) {
+      config.public.clerk.publishableKey = invalid.publicKey;
+    }
+    if ("secretKey" in invalid) {
+      config.clerk.secretKey = invalid.secretKey;
+    }
 
     let error: unknown;
     try {
@@ -101,7 +107,9 @@ describe("validateAuthConfig", () => {
     const message = (error as Error).message;
     expect(message).toContain(invalid.setting);
     for (const value of [config.clerk.secretKey, config.public.clerk.publishableKey]) {
-      if (value) expect(message).not.toContain(value);
+      if (value) {
+        expect(message).not.toContain(value);
+      }
     }
   });
 

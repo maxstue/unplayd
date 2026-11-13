@@ -294,8 +294,11 @@ describe("currentUser BFF through H3", () => {
       });
       const session = clerkSession();
       const fetcher = vi.fn<typeof fetch>();
-      if (source === "Clerk") session.getToken.mockRejectedValue(error);
-      else fetcher.mockRejectedValue(error);
+      if (source === "Clerk") {
+        session.getToken.mockRejectedValue(error);
+      } else {
+        fetcher.mockRejectedValue(error);
+      }
       const response = await currentUserApp(
         session,
         fetcher,
@@ -346,11 +349,13 @@ describe("currentUser BFF through H3", () => {
   it.each(["network failure", "malformed upstream JSON"])("sanitizes %s", async (failure) => {
     const detail = `private-network-${randomUUID()}`;
     const fetcher = vi.fn<typeof fetch>();
-    if (failure === "network failure") fetcher.mockRejectedValue(new Error(detail));
-    else
+    if (failure === "network failure") {
+      fetcher.mockRejectedValue(new Error(detail));
+    } else {
       fetcher.mockResolvedValue(
         new Response(detail, { headers: { "Content-Type": "application/json" } }),
       );
+    }
     const response = await currentUserApp(
       clerkSession(),
       fetcher,

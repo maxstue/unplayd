@@ -57,7 +57,9 @@ function dismiss() {
   active.value = -1;
 }
 function submit() {
-  if (!valid.value) return;
+  if (!valid.value) {
+    return;
+  }
   dismiss();
   emit("search", draft.value.trim());
 }
@@ -67,14 +69,21 @@ function choose(game: GameCardModel) {
 }
 async function move(direction: number) {
   dismissed.value = false;
-  if (!expanded.value) return;
-  if (active.value < 0) active.value = direction > 0 ? 0 : matches.value.length - 1;
-  else active.value = (active.value + direction + matches.value.length) % matches.value.length;
+  if (!expanded.value) {
+    return;
+  }
+  if (active.value < 0) {
+    active.value = direction > 0 ? 0 : matches.value.length - 1;
+  } else {
+    active.value = (active.value + direction + matches.value.length) % matches.value.length;
+  }
   await nextTick();
   list.value?.querySelectorAll("button").item(active.value)?.focus();
 }
 function keydown(event: KeyboardEvent) {
-  if (event.isComposing) return;
+  if (event.isComposing) {
+    return;
+  }
   if (event.key === "Escape") {
     event.preventDefault();
     input.value?.focus();
@@ -87,7 +96,9 @@ function keydown(event: KeyboardEvent) {
   }
 }
 function focusout(event: FocusEvent) {
-  if (!form.value?.contains(event.relatedTarget as Node | null)) focused.value = false;
+  if (!form.value?.contains(event.relatedTarget as Node | null)) {
+    focused.value = false;
+  }
 }
 </script>
 

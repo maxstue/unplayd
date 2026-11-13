@@ -27,7 +27,9 @@ const missingEntry = computed(() => entryError.value?.statusCode === 404);
 watch(
   entry,
   (value) => {
-    if (value) knownEntries.value[id] = true;
+    if (value) {
+      knownEntries.value[id] = true;
+    }
   },
   { immediate: true },
 );
@@ -40,8 +42,9 @@ async function addToLibrary() {
     added.value ||
     !missingEntry.value ||
     !detail.value?.game.isActive
-  )
+  ) {
     return;
+  }
   saving.value = true;
   saveError.value = "";
   try {

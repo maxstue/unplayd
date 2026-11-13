@@ -51,11 +51,15 @@ export function usePasswordAuth(
   );
 
   function signIn() {
-    if (!sdk.signIn.value) throw new Error("Authentication not ready");
+    if (!sdk.signIn.value) {
+      throw new Error("Authentication not ready");
+    }
     return sdk.signIn.value;
   }
   function signUp() {
-    if (!sdk.signUp.value) throw new Error("Authentication not ready");
+    if (!sdk.signUp.value) {
+      throw new Error("Authentication not ready");
+    }
     return sdk.signUp.value;
   }
   function startCooldown() {
@@ -63,18 +67,24 @@ export function usePasswordAuth(
     resendIn.value = 30;
     cooldown = setInterval(() => {
       resendIn.value--;
-      if (resendIn.value <= 0) clearInterval(cooldown);
+      if (resendIn.value <= 0) {
+        clearInterval(cooldown);
+      }
     }, 1000);
   }
   async function run(action: () => Promise<void>) {
-    if (!ready.value || disposed) return;
+    if (!ready.value || disposed) {
+      return;
+    }
     busy.value = true;
     error.value = "";
     notice.value = "";
     try {
       await action();
     } catch (cause) {
-      if (!disposed) error.value = authErrorMessage(cause);
+      if (!disposed) {
+        error.value = authErrorMessage(cause);
+      }
     } finally {
       busy.value = false;
     }
@@ -85,7 +95,9 @@ export function usePasswordAuth(
       "Für dieses Konto ist ein weiterer Sicherheitsschritt erforderlich, der hier noch nicht unterstützt wird. Die Anmeldung wurde nicht abgeschlossen.";
   }
   async function finish(result: { status: string | null; createdSessionId: string | null }) {
-    if (disposed) return;
+    if (disposed) {
+      return;
+    }
     if (result.status !== "complete" || !result.createdSessionId || !sdk.setActive.value) {
       block();
       return;
@@ -95,7 +107,9 @@ export function usePasswordAuth(
     await sdk.setActive.value({
       session: result.createdSessionId,
       navigate: async ({ session }) => {
-        if (disposed) return;
+        if (disposed) {
+          return;
+        }
         if (session?.currentTask || session?.status !== "active") {
           block();
           return;
@@ -108,16 +122,17 @@ export function usePasswordAuth(
     factor.value = selected;
     code.value = "";
     if (selected.strategy === "email_code") {
-      if (firstFactor)
+      if (firstFactor) {
         await signIn().prepareFirstFactor({
           strategy: "email_code",
           emailAddressId: selected.emailAddressId,
         });
-      else
+      } else {
         await signIn().prepareSecondFactor({
           strategy: "email_code",
           emailAddressId: selected.emailAddressId,
         });
+      }
       startCooldown();
     } else if (selected.strategy === "phone_code") {
       await signIn().prepareSecondFactor({
@@ -128,7 +143,9 @@ export function usePasswordAuth(
     }
   }
   async function advanceSignIn(result: SignIn) {
-    if (disposed) return;
+    if (disposed) {
+      return;
+    }
     if (result.status === "complete") {
       await finish(result);
       return;
@@ -196,15 +213,16 @@ export function usePasswordAuth(
       return;
     }
     let result: SignIn;
-    if (strategy === "passkey") result = await signIn().authenticateWithPasskey();
-    else if (firstFactor && strategy === "email_code")
+    if (strategy === "passkey") {
+      result = await signIn().authenticateWithPasskey();
+    } else if (firstFactor && strategy === "email_code") {
       result = await signIn().attemptFirstFactor({ strategy, code: code.value.trim() });
-    else if (["totp", "backup_code", "email_code", "phone_code"].includes(strategy))
+    } else if (["totp", "backup_code", "email_code", "phone_code"].includes(strategy)) {
       result = await signIn().attemptSecondFactor({
         strategy: strategy as "totp" | "backup_code" | "email_code" | "phone_code",
         code: code.value.trim(),
       });
-    else {
+    } else {
       block();
       return;
     }
@@ -227,7 +245,9 @@ export function usePasswordAuth(
       code: code.value.trim(),
       password: password.value,
     });
-    if (result.status !== "needs_new_password") password.value = "";
+    if (result.status !== "needs_new_password") {
+      password.value = "";
+    }
     code.value = "";
     await advanceSignIn(result);
   }
@@ -260,7 +280,9 @@ export function usePasswordAuth(
     });
   }
   async function resend() {
-    if (resendIn.value > 0 || !canResend.value) return;
+    if (resendIn.value > 0 || !canResend.value) {
+      return;
+    }
     await run(async () => {
       if (step.value === "verify-email") {
         await signUp().prepareEmailAddressVerification({ strategy: "email_code" });
@@ -271,18 +293,24 @@ export function usePasswordAuth(
           identifier: email.value.trim(),
         });
         startCooldown();
-      } else if (factor.value) await prepareFactor(factor.value);
+      } else if (factor.value) {
+        await prepareFactor(factor.value);
+      }
       notice.value = "Ein neuer Code wurde angefordert.";
     });
   }
   async function selectFactor(strategy: string) {
     await run(async () => {
       const selected = factors.value.find((item) => item.strategy === strategy);
-      if (selected) await prepareFactor(selected);
+      if (selected) {
+        await prepareFactor(selected);
+      }
     });
   }
   function restart(recovery = false) {
-    if (busy.value) return;
+    if (busy.value) {
+      return;
+    }
     step.value = recovery ? "recover" : "credentials";
     password.value = "";
     code.value = "";

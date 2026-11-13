@@ -7,13 +7,18 @@ watch(
   () => props.entry,
   async (entry) => {
     await nextTick();
-    if (entry && !dialog.value?.open) dialog.value?.showModal();
-    else if (!entry && dialog.value?.open) dialog.value.close();
+    if (entry && !dialog.value?.open) {
+      dialog.value?.showModal();
+    } else if (!entry && dialog.value?.open) {
+      dialog.value.close();
+    }
   },
   { flush: "post" },
 );
 function confirm() {
-  if (!props.entry) return;
+  if (!props.entry) {
+    return;
+  }
   const id = props.entry.gameId;
   dialog.value?.close();
   emit("confirm", id);

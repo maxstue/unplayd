@@ -6,14 +6,22 @@ type Entry = components["schemas"]["LibraryEntry"];
 type Batch = Catalog["schemas"]["GameBatchResponse"];
 
 function getCatalogStatus(batch: Batch | undefined, gameId: string, hasGame: boolean) {
-  if (!batch) return "unavailable";
-  if (batch.inactiveGameIds.includes(gameId)) return "inactive";
+  if (!batch) {
+    return "unavailable";
+  }
+  if (batch.inactiveGameIds.includes(gameId)) {
+    return "inactive";
+  }
   return hasGame ? "available" : "missing";
 }
 
 export async function enrichEntries(entries: Entry[], services: RequestServices) {
-  if (!Array.isArray(entries) || entries.length > 50) throw publicError(503, services.requestId);
-  if (!entries.length) return { items: [], catalogUnavailable: false };
+  if (!Array.isArray(entries) || entries.length > 50) {
+    throw publicError(503, services.requestId);
+  }
+  if (!entries.length) {
+    return { items: [], catalogUnavailable: false };
+  }
   let batch: Batch | undefined;
   try {
     batch = (

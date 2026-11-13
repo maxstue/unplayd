@@ -35,11 +35,17 @@ export function useLibrary(
     failed.value = false;
     try {
       const result = await transport.list(filters.value, controller.signal);
-      if (current === generation && !disposed) page.value = result;
+      if (current === generation && !disposed) {
+        page.value = result;
+      }
     } catch {
-      if (current === generation && !disposed) failed.value = true;
+      if (current === generation && !disposed) {
+        failed.value = true;
+      }
     } finally {
-      if (current === generation && !disposed) fetching.value = false;
+      if (current === generation && !disposed) {
+        fetching.value = false;
+      }
     }
   }
   watch(
@@ -48,8 +54,9 @@ export function useLibrary(
       page.value = null;
       message.value = "";
       mutationError.value = "";
-      if (enabled.value) void refresh();
-      else {
+      if (enabled.value) {
+        void refresh();
+      } else {
         generation++;
         controller?.abort();
         fetching.value = true;
@@ -63,10 +70,14 @@ export function useLibrary(
     controller?.abort();
   });
   async function mutate(id: string, status?: PlayStatus) {
-    if (pending.value || fetching.value || !page.value) return;
+    if (pending.value || fetching.value || !page.value) {
+      return;
+    }
     const before = page.value;
     const entry = before.items.find((item) => item.gameId === id);
-    if (!entry || entry.status === status) return;
+    if (!entry || entry.status === status) {
+      return;
+    }
     const current = generation;
     pending.value = id;
     mutationError.value = "";
@@ -77,12 +88,17 @@ export function useLibrary(
         : before.items.filter((item) => item.gameId !== id),
     };
     try {
-      if (status) await transport.status(id, status);
-      else await transport.remove(id);
+      if (status) {
+        await transport.status(id, status);
+      } else {
+        await transport.remove(id);
+      }
       if (current === generation && !disposed) {
         message.value = status
           ? `„${entry.display.title}“: ${statusLabels[status]} gespeichert.`
           : `„${entry.display.title}“ wurde entfernt.`;
+      }
+      if (!disposed) {
         await refresh();
       }
       return true;

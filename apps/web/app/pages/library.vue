@@ -58,7 +58,9 @@ function freezeLeavingCard(element: Element) {
 }
 function clearLeavingCard(element: Element) {
   const card = element as HTMLElement;
-  for (const property of ["width", "height", "left", "top"]) card.style.removeProperty(property);
+  for (const property of ["width", "height", "left", "top"]) {
+    card.style.removeProperty(property);
+  }
 }
 function filter(key: "status" | "platformId", value: string) {
   return router.push({

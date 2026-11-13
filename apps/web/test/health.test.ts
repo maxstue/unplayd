@@ -22,7 +22,10 @@ it.each(["trace_123-ABC", "a".repeat(64), "invalid request id", "a".repeat(65)])
     );
     const outgoing = response.headers.get("X-Request-ID");
     expect(outgoing).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
-    if (/^[a-zA-Z0-9_-]{1,64}$/.test(id)) expect(outgoing).toBe(id);
-    else expect(outgoing).not.toBe(id);
+    if (/^[a-zA-Z0-9_-]{1,64}$/.test(id)) {
+      expect(outgoing).toBe(id);
+    } else {
+      expect(outgoing).not.toBe(id);
+    }
   },
 );

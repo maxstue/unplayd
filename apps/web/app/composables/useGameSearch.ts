@@ -32,25 +32,39 @@ export function useGameSearch(
     cancel();
     const current = generation;
     const term = query.value.trim();
-    if (!enabled.value || term.length < 2 || term.length > 200) return;
+    if (!enabled.value || term.length < 2 || term.length > 200) {
+      return;
+    }
     controller = new AbortController();
-    if (append) loadingMore.value = true;
-    else status.value = "loading";
+    if (append) {
+      loadingMore.value = true;
+    } else {
+      status.value = "loading";
+    }
     moreError.value = false;
     try {
       const page = await fetchPage(term, append ? nextCursor.value : null, controller.signal);
       // Some transports resolve after abort; they must never replace newer results.
-      if (current !== generation) return;
+      if (current !== generation) {
+        return;
+      }
       const combined = append ? [...items.value, ...page.items] : page.items;
       items.value = [...new Map(combined.map((hit) => [hit.game.id, hit])).values()];
       nextCursor.value = page.nextCursor;
       status.value = "success";
     } catch {
-      if (current !== generation) return;
-      if (append) moreError.value = true;
-      else status.value = "error";
+      if (current !== generation) {
+        return;
+      }
+      if (append) {
+        moreError.value = true;
+      } else {
+        status.value = "error";
+      }
     } finally {
-      if (current === generation) loadingMore.value = false;
+      if (current === generation) {
+        loadingMore.value = false;
+      }
     }
   }
 
@@ -65,8 +79,11 @@ export function useGameSearch(
       const length = query.value.trim().length;
       status.value = enabled.value && length >= 2 && length <= 200 ? "loading" : "idle";
       if (status.value === "loading") {
-        if (debounceMs === 0) void request();
-        else timer = setTimeout(() => void request(), debounceMs);
+        if (debounceMs === 0) {
+          void request();
+        } else {
+          timer = setTimeout(() => void request(), debounceMs);
+        }
       }
     },
     { immediate: true, flush: "sync" },
@@ -81,7 +98,9 @@ export function useGameSearch(
     moreError,
     retry: () => request(),
     loadMore: () => {
-      if (!nextCursor.value || loadingMore.value) return;
+      if (!nextCursor.value || loadingMore.value) {
+        return;
+      }
       return request(true);
     },
   };

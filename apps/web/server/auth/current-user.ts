@@ -16,7 +16,9 @@ export async function currentUser(
     } catch {
       throw createError({ statusCode: 503, statusMessage: "User service unavailable" });
     }
-    if (!token) throw createError({ statusCode: 401, statusMessage: "Unauthorized" });
+    if (!token) {
+      throw createError({ statusCode: 401, statusMessage: "Unauthorized" });
+    }
     let result;
     try {
       const client = createUserClient({
@@ -31,10 +33,12 @@ export async function currentUser(
     } catch {
       throw createError({ statusCode: 503, statusMessage: "User service unavailable" });
     }
-    if (result.response.status === 401)
+    if (result.response.status === 401) {
       throw createError({ statusCode: 401, statusMessage: "Unauthorized" });
-    if (!result.data)
+    }
+    if (!result.data) {
       throw createError({ statusCode: 503, statusMessage: "User service unavailable" });
+    }
     return result.data;
   });
 }

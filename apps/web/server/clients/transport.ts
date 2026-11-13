@@ -24,11 +24,15 @@ export function serviceTransport(options: ServiceClientOptions) {
   ) {
     throw new Error("Service base URL must use HTTP(S) and contain no credentials.");
   }
-  if (!options.token) throw new Error("Service authentication token is required.");
-  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(options.requestId))
+  if (!options.token) {
+    throw new Error("Service authentication token is required.");
+  }
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(options.requestId)) {
     throw new Error("A validated request ID is required.");
-  if (!Number.isInteger(timeoutMs) || timeoutMs < 1)
+  }
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1) {
     throw new Error("Service timeout must be a positive integer.");
+  }
   const fetcher = options.fetch ?? globalThis.fetch;
   return {
     baseUrl: url.href.replace(/\/$/, ""),

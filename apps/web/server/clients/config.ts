@@ -7,6 +7,13 @@ export interface ServicesConfig {
   requestTimeoutMs?: number | string;
 }
 
+/**
+ * Validates the service settings. Errors name the setting, never its value.
+ *
+ * @param config - Raw runtime {@link ServicesConfig}.
+ * @returns The config with numeric `serviceTimeoutMs` and `requestTimeoutMs` (default 5000).
+ * @throws If a URL is not a bare HTTP(S) origin, the token is too short or a timeout is out of range.
+ */
 export function validateServicesConfig(config: ServicesConfig) {
   for (const [name, value] of [
     ["NUXT_USER_API_URL", config.userApiUrl],

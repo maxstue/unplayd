@@ -226,6 +226,41 @@ it("bounds chunked bodies on a real HTTP connection without requiring Content-Le
   }
 });
 
+it("answers a stalled body upload with 503 instead of resetting the connection", async () => {
+  config.requestTimeoutMs = 50;
+  const server = createServer(toNodeListener(app()));
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Missing test port");
+  }
+  try {
+    const statusCode = await new Promise<number | undefined>((resolve, reject) => {
+      const request = httpRequest(
+        `http://127.0.0.1:${address.port}/api/library`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Origin: config.appOrigin },
+        },
+        (response) => {
+          response.resume();
+          response.once("end", () => resolve(response.statusCode));
+        },
+      );
+      request.once("error", reject);
+      request.write('{"gameId":"');
+    });
+    expect(statusCode).toBe(503);
+    expect(fetcher).not.toHaveBeenCalled();
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
 it("loads the complete overview with one user-service query and no catalog requests", async () => {
   const summary = {
     ...emptyOverview,

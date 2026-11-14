@@ -19,6 +19,14 @@ import {
   suggestionQuery,
 } from "./validation";
 
+/**
+ * Searches the catalog with the validated {@link catalogQuery}.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The catalog search page.
+ */
 export function searchGames(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
   return withCatalogService(
     event,
@@ -37,6 +45,14 @@ export function searchGames(event: H3Event, config: ServicesConfig, fetcher?: ty
     fetcher,
   );
 }
+/**
+ * Loads one catalog game by its `gameId` route parameter.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The catalog game detail.
+ */
 export function getGame(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
   return withCatalogService(
     event,
@@ -55,6 +71,14 @@ export function getGame(event: H3Event, config: ServicesConfig, fetcher?: typeof
     fetcher,
   );
 }
+/**
+ * Returns catalog search suggestions for the validated {@link suggestionQuery}.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The catalog suggestions.
+ */
 export function suggestGames(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
   return withCatalogService(
     event,
@@ -73,6 +97,14 @@ export function suggestGames(event: H3Event, config: ServicesConfig, fetcher?: t
     fetcher,
   );
 }
+/**
+ * Looks up several catalog games at once (see {@link batchBody}).
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The catalog batch response.
+ */
 export function batchGames(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
   return withCatalogService(
     event,
@@ -88,6 +120,14 @@ export function batchGames(event: H3Event, config: ServicesConfig, fetcher?: typ
     fetcher,
   );
 }
+/**
+ * Lists the user's library page, enriched with catalog data via {@link enrichEntries}.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The enriched page with `nextCursor`.
+ */
 export function listLibrary(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
   return withServices(
     event,
@@ -110,6 +150,14 @@ export function listLibrary(event: H3Event, config: ServicesConfig, fetcher?: ty
     fetcher,
   );
 }
+/**
+ * Loads one library entry, enriched with catalog data via {@link enrichEntries}.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The enriched entry.
+ */
 export function getLibraryEntry(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
   return withServices(
     event,
@@ -132,6 +180,15 @@ export function getLibraryEntry(event: H3Event, config: ServicesConfig, fetcher?
     fetcher,
   );
 }
+/**
+ * Lists the platforms used in the library, with names resolved from the catalog.
+ * Unresolvable names fall back to a placeholder instead of failing.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns Platforms sorted by German name.
+ */
 export function listLibraryPlatforms(
   event: H3Event,
   config: ServicesConfig,
@@ -189,6 +246,14 @@ export function listLibraryPlatforms(
     fetcher,
   );
 }
+/**
+ * Loads the library overview counts from the user service.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns Total and per-status counts.
+ */
 export function getLibraryOverview(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
   return withUserService(
     event,
@@ -203,6 +268,14 @@ export function getLibraryOverview(event: H3Event, config: ServicesConfig, fetch
     fetcher,
   );
 }
+/**
+ * Adds a library entry from the validated {@link addEntryBody}; mirrors the upstream status.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The created or existing entry.
+ */
 export function addLibraryEntry(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
   return withUserService(
     event,
@@ -218,6 +291,14 @@ export function addLibraryEntry(event: H3Event, config: ServicesConfig, fetcher?
     fetcher,
   );
 }
+/**
+ * Changes a library entry's status from the validated {@link statusBody}.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The updated entry.
+ */
 export function setLibraryStatus(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
   return withUserService(
     event,
@@ -241,6 +322,14 @@ export function setLibraryStatus(event: H3Event, config: ServicesConfig, fetcher
     fetcher,
   );
 }
+/**
+ * Removes a library entry and responds with 204.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns `null`.
+ */
 export function deleteLibraryEntry(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
   return withUserService(
     event,

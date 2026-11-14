@@ -11,6 +11,15 @@ export interface LibraryTransport {
   status: (id: string, status: PlayStatus) => Promise<unknown>;
   remove: (id: string) => Promise<unknown>;
 }
+/**
+ * Loads a library page for the current filters and applies optimistic status changes and removals.
+ * Failed mutations restore the previous page.
+ *
+ * @param filters - Current {@link LibraryFilters}; changes reload the page.
+ * @param transport - {@link LibraryTransport} for listing and mutating entries.
+ * @param enabled - Pauses loading while `false`.
+ * @returns Reactive {@link LibraryPageView} state plus `refresh` and `mutate`.
+ */
 export function useLibrary(
   filters: Ref<LibraryFilters>,
   transport: LibraryTransport,

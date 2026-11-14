@@ -4,6 +4,14 @@ import { createCatalogClient } from "./catalog";
 import { createUserClient } from "./user";
 import { validateServicesConfig, type ServicesConfig } from "./config";
 
+/**
+ * Creates an h3 error with a stable, non-reflecting public body (`{ error: { code, message, requestId } }`).
+ * Unknown status codes fall back to 503.
+ *
+ * @param status - HTTP status, one of 400, 401, 403, 404, 409, 413 or 503.
+ * @param requestId - Correlation ID echoed to the client (see {@link withRequestSignal}).
+ * @returns An error to `throw` from a handler.
+ */
 export function publicError(status: number, requestId: string) {
   const errors: Record<number, [string, string]> = {
     400: ["invalid_request", "Invalid request"],
@@ -60,6 +68,17 @@ function reportUpstreamException(
   reportUpstreamFailure(service, requestId, category);
 }
 
+/**
+ * Runs an openapi-fetch call and maps transport, HTTP and parsing failures to {@link publicError}s.
+ * Failures are logged without request or response bodies.
+ *
+ * @param task - The client call, e.g. `() => user.GET("/me")`.
+ * @param service - Which upstream is called, used for logging and the default allowed statuses.
+ * @param requestId - Correlation ID for logs and public errors.
+ * @param options - {@link UpstreamOptions}: `allowEmpty` for bodiless responses, the request `signal`,
+ *   and `allowedStatuses` to pass through instead of 503.
+ * @returns The response `data` and HTTP `status`.
+ */
 export async function upstream<T>(
   task: () => Promise<{ data?: T; response: Response }>,
   service: "user" | "catalog",
@@ -87,6 +106,9 @@ export async function upstream<T>(
   return { data: result.data as T, status: result.response.status };
 }
 
+/**
+ * Thrown by request validation; {@link withRequestSignal} maps it to a 400 {@link publicError}.
+ */
 export class InvalidInput extends Error {}
 
 interface UserRequestServices {
@@ -100,8 +122,15 @@ export interface RequestServices extends UserRequestServices {
   catalog: ReturnType<typeof createCatalogClient>;
 }
 
-// Bound SDK operations that do not accept an AbortSignal themselves.
-async function abortable<T>(task: Promise<T>, signal: AbortSignal): Promise<T> {
+/**
+ * Bounds work that does not accept an {@link AbortSignal} itself, e.g. SDK calls or body reads.
+ * The task keeps running after an abort; only the returned promise settles early.
+ *
+ * @param task - The pending work to race against the signal.
+ * @param signal - Signal whose abort rejects the returned promise with its reason.
+ * @returns The task's result, unless the signal aborts first.
+ */
+export async function abortable<T>(task: Promise<T>, signal: AbortSignal): Promise<T> {
   signal.throwIfAborted();
   let abort: () => void = () => {};
   const aborted = new Promise<never>((_resolve, reject) => {
@@ -115,6 +144,16 @@ async function abortable<T>(task: Promise<T>, signal: AbortSignal): Promise<T> {
   }
 }
 
+/**
+ * Runs request work under one aggregation deadline that also aborts when the client disconnects.
+ * Stores the combined signal as `event.context.requestSignal` so body reads share the deadline.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param run - Work receiving the deadline `signal` and the disconnect-only `clientSignal`.
+ * @param timeoutMs - Aggregation deadline in milliseconds.
+ * @returns The result of `run`.
+ * @throws A 400 {@link publicError} for {@link InvalidInput}, a 503 once the signal has aborted.
+ */
 export async function withRequestSignal<T>(
   event: H3Event,
   run: (signal: AbortSignal, clientSignal: AbortSignal) => Promise<T>,
@@ -152,6 +191,16 @@ export async function withRequestSignal<T>(
   }
 }
 
+/**
+ * Requires a session, fetches its token and runs `run` with a per-request user-service client.
+ * See {@link withRequestSignal} for deadline handling.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param input - Origin, user-service URL and optional timeouts (subset of {@link ServicesConfig}).
+ * @param run - Work receiving the {@link UserRequestServices}.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The result of `run`.
+ */
 export async function withUserService<T>(
   event: H3Event,
   input: {
@@ -202,6 +251,16 @@ export async function withUserService<T>(
   );
 }
 
+/**
+ * Requires a session and runs `run` with a per-request catalog client authenticated by the service token.
+ * See {@link withRequestSignal} for deadline handling.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param input - Runtime {@link ServicesConfig}, validated via {@link validateServicesConfig}.
+ * @param run - Work receiving the catalog part of {@link RequestServices}.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The result of `run`.
+ */
 export function withCatalogService<T>(
   event: H3Event,
   input: ServicesConfig,
@@ -232,6 +291,15 @@ export function withCatalogService<T>(
   );
 }
 
+/**
+ * Like {@link withUserService}, but also provides a catalog client for the same request.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param input - Runtime {@link ServicesConfig}, validated via {@link validateServicesConfig}.
+ * @param run - Work receiving the full {@link RequestServices}.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The result of `run`.
+ */
 export async function withServices<T>(
   event: H3Event,
   input: ServicesConfig,

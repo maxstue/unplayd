@@ -27,6 +27,12 @@ const messages = new Map<string, string>([
   ["session_exists", "Du bist bereits angemeldet. Öffne dein Konto über die Navigation."],
 ]);
 
+/**
+ * Maps a Clerk error to a German user-facing message without exposing raw error details.
+ *
+ * @param cause - Any thrown value, typically a Clerk API error with `errors[0].code`.
+ * @returns A known message for the code, or a generic fallback.
+ */
 export function authErrorMessage(cause: unknown): string {
   if (cause && typeof cause === "object" && "errors" in cause && Array.isArray(cause.errors)) {
     const first: unknown = cause.errors[0];

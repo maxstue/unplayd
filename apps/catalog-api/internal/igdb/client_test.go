@@ -362,8 +362,10 @@ func TestTransientFailuresAreRetriedWithinBounds(t *testing.T) {
 		{"persistent rate limit", respond(http.StatusTooManyRequests, ""), maxAttempts, ErrUnavailable},
 		{"bad request is not retried", respond(http.StatusBadRequest, `{"title":"Syntax Error"}`), 1, ErrRejected},
 		{"forbidden is not retried", respond(http.StatusForbidden, ""), 1, ErrCredentials},
-		{"malformed JSON is not retried", respond(http.StatusOK, `{"not":"a list"}`), 1, ErrRejected},
-		{"oversized response is not retried", respond(http.StatusOK, "["+strings.Repeat(" ", maxResponseBytes)+"]"), 1, ErrRejected},
+		{"malformed JSON remains recoverable by the worker", respond(http.StatusOK, `{"not":"a list"}`), 1, ErrUnavailable},
+		{"null is not a missing game", respond(http.StatusOK, `null`), 1, ErrUnavailable},
+		{"invalid entries are not missing games", respond(http.StatusOK, `[{"id":1}]`), 1, ErrUnavailable},
+		{"oversized response remains recoverable", respond(http.StatusOK, "["+strings.Repeat(" ", maxResponseBytes)+"]"), maxAttempts, ErrUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake, client := newFakeIGDB(t, tc.handler)
@@ -429,9 +431,9 @@ func TestTokenEndpointFailures(t *testing.T) {
 		{"invalid grant", http.StatusBadRequest, `{"message":"invalid client"}`, 1, ErrCredentials},
 		{"unauthorized", http.StatusUnauthorized, "", 1, ErrCredentials},
 		{"token service unavailable", http.StatusServiceUnavailable, "", maxAttempts, ErrUnavailable},
-		{"malformed token", http.StatusOK, `{"access_token":"","expires_in":3600}`, 1, ErrRejected},
-		{"expired token", http.StatusOK, `{"access_token":"abc","expires_in":0}`, 1, ErrRejected},
-		{"oversized token response", http.StatusOK, strings.Repeat(" ", maxResponseBytes+1), 1, ErrRejected},
+		{"malformed token", http.StatusOK, `{"access_token":"","expires_in":3600}`, maxAttempts, ErrUnavailable},
+		{"expired token", http.StatusOK, `{"access_token":"abc","expires_in":0}`, maxAttempts, ErrUnavailable},
+		{"oversized token response", http.StatusOK, strings.Repeat(" ", maxResponseBytes+1), maxAttempts, ErrUnavailable},
 		{"unexpected token endpoint status", http.StatusNotFound, "", 1, ErrRejected},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

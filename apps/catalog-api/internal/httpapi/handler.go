@@ -43,6 +43,9 @@ func NewHandler(serviceToken string, games Catalog, logger *slog.Logger) http.Ha
 		writeError(w, r, http.StatusNotFound, "not_found", "Not found")
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		r = r.WithContext(ctx)
 		started := time.Now()
 		id := r.Header.Get("X-Request-ID")
 		if !requestIDPattern.MatchString(id) {

@@ -203,6 +203,9 @@ func (a api) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", strings.ToUpper(message[:1])+message[1:]+".")
 	case errors.Is(err, catalog.ErrNotFound):
 		writeError(w, r, http.StatusNotFound, "not_found", "Game not found.")
+	case errors.Is(err, context.DeadlineExceeded):
+		a.logger.WarnContext(r.Context(), "catalog request deadline exceeded")
+		writeError(w, r, http.StatusServiceUnavailable, "unavailable", "The request timed out.")
 	case errors.Is(err, context.Canceled) && r.Context().Err() != nil:
 		a.logger.InfoContext(r.Context(), "catalog request canceled by the caller")
 		writeError(w, r, http.StatusServiceUnavailable, "unavailable", "The request was canceled.")

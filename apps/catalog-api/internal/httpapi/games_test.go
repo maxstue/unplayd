@@ -30,10 +30,12 @@ type fakeCatalog struct {
 	detail   catalog.Detail
 	batch    catalog.Batch
 	err      error
+	deadline time.Time
 }
 
-func (f *fakeCatalog) Search(_ context.Context, request catalog.SearchRequest) (catalog.SearchPage, error) {
+func (f *fakeCatalog) Search(ctx context.Context, request catalog.SearchRequest) (catalog.SearchPage, error) {
 	f.calls++
+	f.deadline, _ = ctx.Deadline()
 	f.search = request
 	return f.page, f.err
 }
@@ -55,6 +57,24 @@ func newTestHandler(token string, games Catalog) http.Handler {
 }
 
 const testToken = "test-service-token-with-at-least-32-bytes"
+
+func TestCatalogRequestsHaveABoundedDeadline(t *testing.T) {
+	games := &fakeCatalog{}
+	before := time.Now()
+	serve(newTestHandler(testToken, games), http.MethodGet, "/games?query=halo", "")
+	if games.deadline.IsZero() || games.deadline.After(before.Add(3*time.Second+100*time.Millisecond)) {
+		t.Fatalf("request deadline=%v, want at most three seconds", games.deadline)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	request := httptest.NewRequest(http.MethodGet, "/games?query=halo", nil).WithContext(ctx)
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	newTestHandler(testToken, games).ServeHTTP(httptest.NewRecorder(), request)
+	expected, _ := ctx.Deadline()
+	if !games.deadline.Equal(expected) {
+		t.Fatal("shorter caller deadline was not preserved")
+	}
+}
 
 func serve(handler http.Handler, method, target, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
@@ -187,6 +207,7 @@ func TestCatalogErrorsMapToContractResponses(t *testing.T) {
 		{"invalid request", fmt.Errorf("%w: limit must be between 1 and 50", catalog.ErrInvalidRequest), http.StatusBadRequest, "invalid_request"},
 		{"not found", catalog.ErrNotFound, http.StatusNotFound, "not_found"},
 		{"provider unavailable", fmt.Errorf("%w: %s", catalog.ErrUnavailable, secret), http.StatusServiceUnavailable, "unavailable"},
+		{"deadline exceeded", context.DeadlineExceeded, http.StatusServiceUnavailable, "unavailable"},
 		{"internal failure", errors.New(secret), http.StatusInternalServerError, "internal_error"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

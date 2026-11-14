@@ -7,6 +7,14 @@ export interface ServiceClientOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Validates service client options and builds openapi-fetch settings with auth and request-ID
+ * headers, disabled redirects and a per-call timeout combined with the optional request signal.
+ *
+ * @param options - {@link ServiceClientOptions}; `timeoutMs` defaults to 3000.
+ * @returns `baseUrl`, `headers` and `fetch` for `createClient`.
+ * @throws If the base URL, token, request ID or timeout is invalid.
+ */
 export function serviceTransport(options: ServiceClientOptions) {
   const timeoutMs = options.timeoutMs ?? 3_000;
   let url: URL;

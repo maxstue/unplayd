@@ -33,6 +33,8 @@ type refreshJob struct {
 }
 
 func (s *Store) claimRefresh(ctx context.Context, p RefreshPolicy) (refreshJob, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	var j refreshJob
 	err := s.db.QueryRowContext(ctx, `WITH candidate AS (
  SELECT j.game_id FROM catalog.refresh_jobs j JOIN catalog.games g ON g.id=j.game_id
@@ -238,6 +240,8 @@ func (s *Store) cleanupSearches(ctx context.Context) (int64, error) {
 	}
 }
 func (s *Store) logRefreshStats(ctx context.Context, logger *slog.Logger) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	var pending, running, failed int64
 	var oldest sql.NullTime
 	err := s.db.QueryRowContext(ctx, `SELECT count(*) FILTER(WHERE state='pending' AND next_run_at<=now()),count(*) FILTER(WHERE state='running'),count(*) FILTER(WHERE state='failed'),min(next_run_at) FILTER(WHERE state='pending') FROM catalog.refresh_jobs`).Scan(&pending, &running, &failed, &oldest)

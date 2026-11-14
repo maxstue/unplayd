@@ -36,6 +36,12 @@ export interface LibraryFilters {
   platformId?: string;
   cursor?: string;
 }
+/**
+ * Picks valid library filters from a route query and drops everything else.
+ *
+ * @param query - Raw route query.
+ * @returns The valid {@link LibraryFilters}.
+ */
 export function libraryFilters(query: Record<string, unknown>): LibraryFilters {
   return {
     ...(typeof query.status === "string" && Object.hasOwn(statusLabels, query.status)
@@ -50,9 +56,21 @@ export function libraryFilters(query: Record<string, unknown>): LibraryFilters {
       : {}),
   };
 }
+/**
+ * Accepts only internal library or dashboard paths as a return target, preventing open redirects.
+ *
+ * @param value - Untrusted return path, e.g. from a query parameter.
+ * @returns The path, or `null` if it is not allowed.
+ */
 export function libraryReturnPath(value: unknown) {
   return typeof value === "string" && /^\/(library|dashboard)(\?|$)/.test(value) ? value : null;
 }
+/**
+ * Returns the display name of an entry's platform.
+ *
+ * @param entry - The {@link LibraryEntryView}.
+ * @returns The platform name, or a German placeholder if none is set or it cannot be resolved.
+ */
 export function platformLabel(entry: LibraryEntryView) {
   if (!entry.platformId) {
     return "Ohne Plattform";

@@ -26,6 +26,27 @@ func TestConnectionConfigurationEncodesCredentialsAndOwnSchema(t *testing.T) {
 	if strings.Contains(fmt.Sprint(config), password) {
 		t.Fatal("configuration diagnostics expose credentials")
 	}
+	for key, want := range map[string]string{"connect_timeout": "3", "statement_timeout": "2000", "lock_timeout": "1000"} {
+		if got := connection.Query().Get(key); got != want {
+			t.Fatalf("%s=%s, want %s", key, got, want)
+		}
+	}
+}
+
+func TestMigrationTimeoutsPermitDDLWithoutChangingApplicationTimeouts(t *testing.T) {
+	values := map[string]string{"DATABASE_URL": "postgresql://localhost/unplayd?statement_timeout=750&lock_timeout=500&connect_timeout=2", "DATABASE_PASSWORD": rand.Text()}
+	config, err := Load(func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	application, _ := url.Parse(config.connectionString())
+	migration, _ := url.Parse(config.migrationConfig().connectionString())
+	if application.Query().Get("statement_timeout") != "750" || application.Query().Get("lock_timeout") != "500" {
+		t.Fatal("explicit application settings were overwritten")
+	}
+	if migration.Query().Get("statement_timeout") != "0" || migration.Query().Get("lock_timeout") != "10000" || migration.Query().Get("connect_timeout") != "2" {
+		t.Fatal("migration bounds must allow long DDL but retain connection and lock limits")
+	}
 }
 
 func TestInvalidDatabaseConfigurationIsRejected(t *testing.T) {

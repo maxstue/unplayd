@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { once } from "node:events";
 import {
   createApp,
@@ -31,6 +31,7 @@ const config = {
   catalogApiUrl: "http://catalog-api:8446",
   catalogServiceToken: randomUUID(),
   serviceTimeoutMs: 1000,
+  requestTimeoutMs: 5000,
 };
 vi.mock("#imports", () => ({ useRuntimeConfig: () => config }));
 const aliceToken = randomUUID();
@@ -94,7 +95,10 @@ function app() {
                   isAuthenticated: true,
                   userId: user === "bob" ? "user_bob" : "user_alice",
                   sessionId: "sess_test",
-                  getToken: () => Promise.resolve(user === "bob" ? bobToken : aliceToken),
+                  getToken: () =>
+                    user === "token-hangs"
+                      ? new Promise<string>(() => {})
+                      : Promise.resolve(user === "bob" ? bobToken : aliceToken),
                 },
         });
       }),
@@ -127,6 +131,7 @@ function requests() {
 beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
   config.serviceTimeoutMs = 1000;
+  config.requestTimeoutMs = 5000;
   fetcher.mockReset().mockRejectedValue(new Error("Unexpected upstream"));
   vi.stubGlobal("fetch", fetcher);
 });
@@ -139,6 +144,122 @@ const emptyOverview = {
   total: 0,
   statuses: { backlog: 0, playing: 0, completed: 0, paused: 0, dropped: 0 },
 };
+
+it("shares the aggregation deadline across serial upstream calls and keeps snapshots", async () => {
+  config.requestTimeoutMs = 60;
+  fetcher
+    .mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 35));
+      return Response.json({ items: [first], nextCursor: null });
+    })
+    .mockImplementationOnce(
+      (_request, init) =>
+        new Promise((_resolve, reject) => {
+          init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), {
+            once: true,
+          });
+        }),
+    );
+  const started = Date.now();
+  const response = await send("/api/library");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    catalogUnavailable: true,
+    items: [{ display: first.snapshot }],
+  });
+  expect(Date.now() - started).toBeLessThan(500);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it("bounds token acquisition and does not acquire user tokens for catalog-only routes", async () => {
+  config.requestTimeoutMs = 30;
+  const headers = { "x-test-session": "token-hangs" };
+  expect((await send("/api/library", "GET", undefined, headers)).status).toBe(503);
+  expect(fetcher).not.toHaveBeenCalled();
+  fetcher.mockResolvedValueOnce(Response.json({ items: [], nextCursor: null }));
+  expect((await send("/api/games?query=Zelda", "GET", undefined, headers)).status).toBe(200);
+});
+
+it("rejects oversized JSON bodies before any upstream request", async () => {
+  const response = await send("/api/library", "POST", {
+    gameId: first.gameId,
+    ownership: "owned",
+    extra: "x".repeat(17_000),
+  });
+  expect(response.status).toBe(413);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it("bounds chunked bodies on a real HTTP connection without requiring Content-Length", async () => {
+  const server = createServer(toNodeListener(app()));
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Missing test port");
+  }
+  try {
+    const statusCode = await new Promise<number | undefined>((resolve, reject) => {
+      const request = httpRequest(
+        `http://127.0.0.1:${address.port}/api/library`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Origin: config.appOrigin },
+        },
+        (response) => {
+          response.resume();
+          response.once("end", () => resolve(response.statusCode));
+        },
+      );
+      request.once("error", reject);
+      request.write('{"extra":"');
+      request.write("x".repeat(17_000));
+      request.end('"}');
+    });
+    expect(statusCode).toBe(413);
+    expect(fetcher).not.toHaveBeenCalled();
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+it("answers a stalled body upload with 503 instead of resetting the connection", async () => {
+  config.requestTimeoutMs = 50;
+  const server = createServer(toNodeListener(app()));
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Missing test port");
+  }
+  try {
+    const statusCode = await new Promise<number | undefined>((resolve, reject) => {
+      const request = httpRequest(
+        `http://127.0.0.1:${address.port}/api/library`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Origin: config.appOrigin },
+        },
+        (response) => {
+          response.resume();
+          response.once("end", () => resolve(response.statusCode));
+        },
+      );
+      request.once("error", reject);
+      request.write('{"gameId":"');
+    });
+    expect(statusCode).toBe(503);
+    expect(fetcher).not.toHaveBeenCalled();
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
 
 it("loads the complete overview with one user-service query and no catalog requests", async () => {
   const summary = {
@@ -584,6 +705,9 @@ it.each([
   { serviceTimeoutMs: 0 },
   { serviceTimeoutMs: "invalid" },
   { serviceTimeoutMs: 30001 },
+  { requestTimeoutMs: 0 },
+  { requestTimeoutMs: "invalid" },
+  { requestTimeoutMs: 30001 },
 ])("rejects invalid service configuration without reflecting the value: %j", (invalid) => {
   expect(() => validateServicesConfig({ ...config, ...invalid })).toThrow(/NUXT_/);
 });

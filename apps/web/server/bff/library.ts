@@ -15,6 +15,14 @@ function getCatalogStatus(batch: Batch | undefined, gameId: string, hasGame: boo
   return hasGame ? "available" : "missing";
 }
 
+/**
+ * Joins library entries with current catalog data. If the catalog fails within the deadline,
+ * entries fall back to their stored snapshots and `catalogUnavailable` is set.
+ *
+ * @param entries - Up to 50 user-service {@link Entry} items.
+ * @param services - {@link RequestServices} for the current request.
+ * @returns View items with `display` data and a per-entry `catalogStatus`.
+ */
 export async function enrichEntries(entries: Entry[], services: RequestServices) {
   if (!Array.isArray(entries) || entries.length > 50) {
     throw publicError(503, services.requestId);
@@ -43,7 +51,8 @@ export async function enrichEntries(entries: Entry[], services: RequestServices)
       batch = undefined;
     }
   } catch {
-    services.signal.throwIfAborted();
+    // A spent aggregation budget still permits the already loaded snapshots.
+    services.clientSignal.throwIfAborted();
   }
   const games = new Map(batch?.items.map((game) => [game.id, game]));
   return {

@@ -7,6 +7,16 @@ type FetchPage = (
   signal: AbortSignal,
 ) => Promise<CatalogPage>;
 
+/**
+ * Debounced, cancellable catalog search with cursor pagination. Stale responses never replace newer
+ * ones, and results are de-duplicated by game ID.
+ *
+ * @param query - Search term; 2 to 200 characters after trimming trigger a search.
+ * @param enabled - Pauses searching while `false`.
+ * @param fetchPage - Loads one {@link CatalogPage}; must honor the given {@link AbortSignal}.
+ * @param debounceMs - Delay before searching; `0` searches immediately.
+ * @returns Reactive {@link SearchHit} items and status, plus `retry` and `loadMore`.
+ */
 export function useGameSearch(
   query: Ref<string>,
   enabled: Ref<boolean>,

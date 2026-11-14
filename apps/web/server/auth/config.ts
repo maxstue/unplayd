@@ -4,7 +4,14 @@ export interface WebAuthConfig {
   public: { clerk: { publishableKey?: string } };
 }
 
-// This module is server-only. Errors identify settings, never their values.
+/**
+ * Validates the app origin and the Clerk key pair.
+ * This module is server-only. Errors identify settings, never their values.
+ *
+ * @param config - Runtime {@link WebAuthConfig}.
+ * @throws If the origin is not HTTPS (HTTP only for localhost) or the Clerk keys are missing,
+ *   malformed or from different environments.
+ */
 export function validateAuthConfig(config: WebAuthConfig) {
   let origin: URL;
   try {

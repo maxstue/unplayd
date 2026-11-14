@@ -27,6 +27,16 @@ export interface PasswordAuthSdk {
   isLoaded: Readonly<Ref<boolean>>;
 }
 
+/**
+ * Drives Clerk password sign-in or sign-up as a step machine, including email verification,
+ * second factors, password reset and renewal. Unsupported steps end in `blocked`.
+ * Passwords and codes are cleared after each attempt and when the scope is disposed.
+ *
+ * @param mode - Whether the form signs in or signs up.
+ * @param sdk - Clerk refs as {@link PasswordAuthSdk}.
+ * @param onComplete - Called once the new session is active.
+ * @returns Reactive form state plus `submit`, `resend`, `selectFactor` and `restart`.
+ */
 export function usePasswordAuth(
   mode: "sign-in" | "sign-up",
   sdk: PasswordAuthSdk,

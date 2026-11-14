@@ -218,38 +218,47 @@ func TestChildCountsAndDetailGroupChildrenByKind(t *testing.T) {
 		t.Fatalf("resident evil counts = %+v", counts)
 	}
 
-	t.Run("parent detail", func(t *testing.T) {
-		detail, err := store.Detail(t.Context(), parent.ID)
-		if err != nil {
-			t.Fatal(err)
+	t.Run("parent detail", func(t *testing.T) { assertGroupedParentDetail(t, store, parent) })
+	t.Run("child detail", func(t *testing.T) { assertChildDetail(t, store, remake, original) })
+	t.Run("unknown and malformed IDs", func(t *testing.T) { assertUnknownDetails(t, store) })
+}
+
+func assertGroupedParentDetail(t *testing.T, store *Store, parent Game) {
+	t.Helper()
+	detail, err := store.Detail(t.Context(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := groupedTitles(t, detail, &parent)
+	want := [][]string{
+		{complete.Title},
+		{bloodAndWine.Title, heartsOfStone.Title},
+		{nextGen.Title},
+	}
+	if detail.Game.ID != parent.ID || !slices.Equal(groupKinds(detail), []Kind{KindEdition, KindExpansion, KindUpdate}) || !slices.EqualFunc(got, want, slices.Equal) {
+		t.Fatalf("detail children = %v, want %v", got, want)
+	}
+}
+
+func assertChildDetail(t *testing.T, store *Store, remake, original Game) {
+	t.Helper()
+	detail, err := store.Detail(t.Context(), remake.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertParent(t, detail.Game, &original)
+	if detail.Game.Kind != KindRemake || len(detail.Children) != 0 {
+		t.Fatalf("child detail = %+v", detail)
+	}
+}
+
+func assertUnknownDetails(t *testing.T, store *Store) {
+	t.Helper()
+	for _, id := range []string{"10000000-0000-4000-8000-000000000099", "not-a-uuid"} {
+		if _, err := store.Detail(t.Context(), id); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("Detail(%q) err = %v, want ErrNotFound", id, err)
 		}
-		got := groupedTitles(t, detail, &parent)
-		want := [][]string{
-			{complete.Title},
-			{bloodAndWine.Title, heartsOfStone.Title},
-			{nextGen.Title},
-		}
-		if detail.Game.ID != parent.ID || !slices.Equal(groupKinds(detail), []Kind{KindEdition, KindExpansion, KindUpdate}) || !slices.EqualFunc(got, want, slices.Equal) {
-			t.Fatalf("detail children = %v, want %v", got, want)
-		}
-	})
-	t.Run("child detail", func(t *testing.T) {
-		detail, err := store.Detail(t.Context(), remake.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertParent(t, detail.Game, &original)
-		if detail.Game.Kind != KindRemake || len(detail.Children) != 0 {
-			t.Fatalf("child detail = %+v", detail)
-		}
-	})
-	t.Run("unknown and malformed IDs", func(t *testing.T) {
-		for _, id := range []string{"10000000-0000-4000-8000-000000000099", "not-a-uuid"} {
-			if _, err := store.Detail(t.Context(), id); !errors.Is(err, ErrNotFound) {
-				t.Fatalf("Detail(%q) err = %v, want ErrNotFound", id, err)
-			}
-		}
-	})
+	}
 }
 
 func TestImporterCompletesChainsAndLoadsChildrenWithoutNPlusOne(t *testing.T) {

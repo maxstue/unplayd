@@ -41,6 +41,24 @@ function reportUpstreamFailure(
   });
 }
 
+function reportUpstreamException(
+  cause: unknown,
+  service: "user" | "catalog",
+  requestId: string,
+  signal?: AbortSignal,
+) {
+  if (signal?.aborted || (cause instanceof Error && cause.name === "AbortError")) {
+    return;
+  }
+  let category: "timeout" | "transport" | "parsing" = "transport";
+  if (cause instanceof Error && cause.name === "TimeoutError") {
+    category = "timeout";
+  } else if (cause instanceof SyntaxError) {
+    category = "parsing";
+  }
+  reportUpstreamFailure(service, requestId, category);
+}
+
 export async function upstream<T>(
   task: () => Promise<{ data?: T; response: Response }>,
   service: "user" | "catalog",
@@ -56,15 +74,7 @@ export async function upstream<T>(
   try {
     result = await task();
   } catch (cause) {
-    if (!signal?.aborted && !(cause instanceof Error && cause.name === "AbortError")) {
-      const category =
-        cause instanceof Error && cause.name === "TimeoutError"
-          ? "timeout"
-          : cause instanceof SyntaxError
-            ? "parsing"
-            : "transport";
-      reportUpstreamFailure(service, requestId, category);
-    }
+    reportUpstreamException(cause, service, requestId, signal);
     throw publicError(503, requestId);
   }
   if (!result.response.ok) {

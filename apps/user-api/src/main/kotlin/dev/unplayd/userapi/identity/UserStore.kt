@@ -17,7 +17,7 @@ data class MeResponse(
     val clerkSubject: String,
 )
 
-interface UserStore {
+fun interface UserStore {
     suspend fun resolve(subject: String): LocalUser
 }
 

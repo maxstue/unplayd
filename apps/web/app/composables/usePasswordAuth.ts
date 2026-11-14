@@ -18,6 +18,14 @@ type EmailFactor = Extract<Factor, { strategy: "email_code" }>;
 type Challenge =
   | { step: "second-factor"; level: "first"; factor: EmailFactor; factors: EmailFactor[] }
   | { step: "second-factor"; level: "second"; factor: Factor; factors: Factor[] };
+function selectChallengeFactor<C extends Challenge>(current: C, strategy: string): C | undefined {
+  const selected = current.factors.find((item) => item.strategy === strategy);
+  if (!selected) {
+    return;
+  }
+  return { ...current, factor: selected };
+}
+
 type AuthState = { step: Exclude<Step, "second-factor"> } | Challenge;
 export interface PasswordAuthSdk {
   signIn: Readonly<Ref<SignIn | undefined>>;
@@ -347,16 +355,9 @@ export function usePasswordAuth(
       if (!current) {
         return;
       }
-      if (current.level === "first") {
-        const selected = current.factors.find((item) => item.strategy === strategy);
-        if (selected) {
-          await prepareFactor({ ...current, factor: selected });
-        }
-      } else {
-        const selected = current.factors.find((item) => item.strategy === strategy);
-        if (selected) {
-          await prepareFactor({ ...current, factor: selected });
-        }
+      const next = selectChallengeFactor(current, strategy);
+      if (next) {
+        await prepareFactor(next);
       }
     });
   }

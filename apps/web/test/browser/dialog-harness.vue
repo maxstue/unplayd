@@ -3,6 +3,7 @@ import { ref } from "vue";
 import RemoveGameDialog from "../../app/components/RemoveGameDialog.vue";
 import type { LibraryEntryView } from "../../shared/library";
 defineProps<{ entry: LibraryEntryView }>();
+const emit = defineEmits<{ confirm: [id: string] }>();
 const selected = ref<LibraryEntryView | null>(null);
 const result = ref("");
 </script>
@@ -19,6 +20,7 @@ const result = ref("");
     @confirm="
       selected = null;
       result = $event;
+      emit('confirm', $event);
     "
   />
 </template>

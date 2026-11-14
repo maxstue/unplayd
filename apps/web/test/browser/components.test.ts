@@ -43,11 +43,16 @@ describe("native removal dialog", () => {
   );
 
   it("confirms the selected entry exactly once", async () => {
-    await render(DialogHarness, { props: { entry }, global: { components: { GameCover } } });
+    const confirm = vi.fn();
+    await render(DialogHarness, {
+      props: { entry, onConfirm: confirm },
+      global: { components: { GameCover } },
+    });
     await page.getByRole("button", { name: "Entfernen öffnen" }).click();
     await page.getByRole("button", { name: "Spiel entfernen", exact: true }).click();
     await expect.poll(() => document.querySelector("dialog")?.open).toBe(false);
     await expect.element(page.getByRole("status")).toHaveTextContent(game.id);
+    expect(confirm).toHaveBeenCalledExactlyOnceWith(game.id);
   });
 });
 

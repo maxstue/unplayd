@@ -32,7 +32,7 @@ const emit = defineEmits<{ status: [status: PlayStatus]; remove: [] }>();
     </button>
     <NuxtLink :to="{ path: `/games/${entry.gameId}`, query: { returnTo } }" class="game-link"
       ><GameCover :src="entry.display.coverUrl" :title="entry.display.title">
-        <span v-if="saving" class="card-updating" role="status">Wird aktualisiert …</span>
+        <output v-if="saving" class="card-updating">Wird aktualisiert …</output>
       </GameCover>
       <h3>{{ entry.display.title }}</h3></NuxtLink
     >

@@ -13,7 +13,10 @@
     "lint": "vp lint --deny-warnings && vp run lint:eslint",
     "format": "vp fmt",
     "format:check": "vp fmt --check",
-    "test": "vp test run --coverage && vp run test:build",
+    "test": "vp run test:unit && vp run test:browser && vp run test:e2e && vp run test:build",
+    "test:unit": "vp test run --coverage",
+    "test:browser": "vp test run --config vitest.browser.config.ts",
+    "test:e2e": "playwright test",
     "test:build": "node --test --test-reporter=spec test/production/*.test.mjs"
   },
   "dependencies": {
@@ -26,14 +29,19 @@
   },
   "devDependencies": {
     "@nuxt/eslint": "1.17.0",
+    "@playwright/test": "1.65.0",
     "@types/node": "24.19.2",
     "@typescript/native": "npm:typescript@7.0.2",
+    "@vitejs/plugin-vue": "6.0.10",
+    "@vitest/browser-playwright": "5.1.0",
     "@vitest/coverage-v8": "catalog:",
     "eslint": "10.14.0",
     "eslint-plugin-oxlint": "1.90.0",
+    "playwright": "1.65.0",
     "typescript": "npm:@typescript/typescript6@6.0.2",
     "vite-plus": "catalog:",
     "vitest": "catalog:",
+    "vitest-browser-vue": "3.1.0",
     "vue-tsc": "3.3.14"
   }
 }

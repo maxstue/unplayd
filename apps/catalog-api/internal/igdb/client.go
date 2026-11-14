@@ -264,7 +264,7 @@ func (c *Client) post(ctx context.Context, endpoint, query string) ([]byte, erro
 		}
 		switch {
 		case errors.Is(err, ErrRejected):
-			return nil, ErrCredentials
+			return nil, err
 		case err == nil && status == http.StatusOK:
 			return body, nil
 		case err == nil && status == http.StatusUnauthorized && !renewed:
@@ -344,8 +344,10 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("token request: %w", err)
 	case status == http.StatusTooManyRequests || status >= http.StatusInternalServerError:
 		return "", fmt.Errorf("token request status %d", status)
+	case status == http.StatusBadRequest || status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return "", fmt.Errorf("%w: token request status %d", ErrCredentials, status)
 	case status != http.StatusOK:
-		return "", fmt.Errorf("%w: token request status %d; check IGDB credentials", ErrRejected, status)
+		return "", fmt.Errorf("%w: token request status %d", ErrRejected, status)
 	}
 	var token tokenResponse
 	if err := json.Unmarshal(body, &token); err != nil || !validCredential(token.AccessToken) || token.ExpiresIn <= 0 {

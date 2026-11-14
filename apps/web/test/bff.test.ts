@@ -15,6 +15,8 @@ import suggestions from "../server/api/games/suggestions.get";
 import detail from "../server/api/games/[gameId].get";
 import batch from "../server/api/games/batch.post";
 import library from "../server/api/library/index.get";
+import platforms from "../server/api/library/platforms.get";
+import overview from "../server/api/library/overview.get";
 import entry from "../server/api/library/[gameId].get";
 import add from "../server/api/library/index.post";
 import status from "../server/api/library/[gameId]/status.put";
@@ -73,6 +75,8 @@ function app() {
     .get("/api/games/:gameId", detail)
     .post("/api/games/batch", batch)
     .get("/api/library", library)
+    .get("/api/library/platforms", platforms)
+    .get("/api/library/overview", overview)
     .post("/api/library", add)
     .get("/api/library/:gameId", entry)
     .put("/api/library/:gameId/status", status)
@@ -121,17 +125,127 @@ function requests() {
 }
 
 beforeEach(() => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
   config.serviceTimeoutMs = 1000;
   fetcher.mockReset().mockRejectedValue(new Error("Unexpected upstream"));
   vi.stubGlobal("fetch", fetcher);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+const emptyOverview = {
+  total: 0,
+  statuses: { backlog: 0, playing: 0, completed: 0, paused: 0, dropped: 0 },
+};
+
+it("loads the complete overview with one user-service query and no catalog requests", async () => {
+  const summary = {
+    ...emptyOverview,
+    total: 125,
+    statuses: { ...emptyOverview.statuses, playing: 125 },
+  };
+  fetcher.mockResolvedValueOnce(Response.json(summary));
+  const response = await send("/api/library/overview");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual(summary);
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(requests()[0]!.url).toBe(`${config.userApiUrl}/library/overview`);
+  expect(requests()[0]!.headers.get("Authorization")).toBe(`Bearer ${aliceToken}`);
+});
+
+it("reports an empty overview and rejects unsigned sessions without upstream requests", async () => {
+  expect(
+    (await send("/api/library/overview", "GET", undefined, { "x-test-session": "none" })).status,
+  ).toBe(401);
+  expect(fetcher).not.toHaveBeenCalled();
+  fetcher.mockResolvedValueOnce(Response.json(emptyOverview));
+  expect(await (await send("/api/library/overview")).json()).toEqual(emptyOverview);
+});
+
+it("loads only representative games for distinct assigned platforms", async () => {
+  const pc = randomUUID();
+  const consoleId = randomUUID();
+  fetcher
+    .mockResolvedValueOnce(
+      Response.json({
+        items: [
+          { platformId: pc, gameId: first.gameId },
+          { platformId: consoleId, gameId: second.gameId },
+        ],
+      }),
+    )
+    .mockResolvedValueOnce(
+      Response.json({
+        items: [
+          {
+            ...game(first.gameId),
+            platforms: [
+              { id: pc, name: "PC" },
+              { id: consoleId, name: "Konsole" },
+            ],
+          },
+        ],
+        missingGameIds: [second.gameId],
+        inactiveGameIds: [],
+      }),
+    );
+  expect(await (await send("/api/library/platforms")).json()).toEqual([
+    { id: consoleId, name: "Konsole" },
+    { id: pc, name: "PC" },
+  ]);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(requests()[0]!.url).toBe(`${config.userApiUrl}/library/platforms`);
+  expect(await requests()[1]!.json()).toEqual({ gameIds: [first.gameId, second.gameId] });
+});
+
+it("retains platform choices when catalog names cannot be loaded and skips empty batches", async () => {
+  const platformId = randomUUID();
+  fetcher
+    .mockResolvedValueOnce(Response.json({ items: [{ gameId: first.gameId, platformId }] }))
+    .mockResolvedValueOnce(new Response(null, { status: 503 }));
+  expect(await (await send("/api/library/platforms")).json()).toEqual([
+    { id: platformId, name: "Plattform nicht verfügbar" },
+  ]);
+  fetcher.mockReset().mockResolvedValueOnce(Response.json({ items: [] }));
+  expect(await (await send("/api/library/platforms")).json()).toEqual([]);
+  expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it("bounds each catalog batch when a library has more than 100 platforms", async () => {
+  const items = Array.from({ length: 101 }, () => ({
+    platformId: randomUUID(),
+    gameId: randomUUID(),
+  }));
+  fetcher
+    .mockResolvedValueOnce(Response.json({ items }))
+    .mockImplementation(async () =>
+      Response.json({ items: [], missingGameIds: [], inactiveGameIds: [] }),
+    );
+  expect(await (await send("/api/library/platforms")).json()).toHaveLength(101);
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  const sizes = await Promise.all(
+    requests()
+      .slice(1)
+      .map(async (request) => ((await request.json()) as { gameIds: string[] }).gameIds.length),
+  );
+  expect(sizes).toEqual([100, 1]);
+});
+
+it("requires a session for platform choices", async () => {
+  expect(
+    (await send("/api/library/platforms", "GET", undefined, { "x-test-session": "none" })).status,
+  ).toBe(401);
+  expect(fetcher).not.toHaveBeenCalled();
+});
 
 it("aggregates a page with one batch and forwards only the appropriate credentials and filters", async () => {
   fetcher.mockImplementation(async (input) => {
     const request = input as Request;
-    if (request.url.startsWith(config.userApiUrl))
+    if (request.url.startsWith(config.userApiUrl)) {
       return Response.json({ items: [first, second], nextCursor: "next" });
+    }
     expect(await request.json()).toEqual({ gameIds: [first.gameId, second.gameId] });
     return Response.json({
       items: [game(first.gameId)],
@@ -221,7 +335,17 @@ it.each([401, 403, 429, 500, 503, "invalid-json", "invalid-shape"])(
     const response = await send("/api/library");
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      items: [{ ...first, game: null, display: first.snapshot, catalogStatus: "unavailable" }],
+      items: [
+        {
+          gameId: first.gameId,
+          platformId: first.platformId,
+          ownership: first.ownership,
+          status: first.status,
+          game: null,
+          display: first.snapshot,
+          catalogStatus: "unavailable",
+        },
+      ],
       nextCursor: null,
       catalogUnavailable: true,
     });
@@ -237,7 +361,7 @@ it("uses the snapshot for an inactive game and enriches individual library entri
   const response = await send(`/api/library/${first.gameId}`);
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
-    ...first,
+    gameId: first.gameId,
     display: first.snapshot,
     catalogStatus: "inactive",
   });
@@ -385,8 +509,9 @@ it.each(["user", "catalog"])(
     const abort = new Promise<void>((resolve) => {
       aborted = resolve;
     });
-    if (phase === "catalog")
+    if (phase === "catalog") {
       fetcher.mockResolvedValueOnce(Response.json({ items: [first], nextCursor: null }));
+    }
     fetcher.mockImplementation(
       (_input, init) =>
         new Promise((_resolve, reject) => {
@@ -405,7 +530,9 @@ it.each(["user", "catalog"])(
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     const address = server.address();
-    if (!address || typeof address === "string") throw new Error("Missing test port");
+    if (!address || typeof address === "string") {
+      throw new Error("Missing test port");
+    }
     const controller = new AbortController();
     try {
       const pending = networkFetch(`http://127.0.0.1:${address.port}/api/library`, {

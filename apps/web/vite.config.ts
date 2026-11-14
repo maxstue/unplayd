@@ -8,6 +8,7 @@ export default defineConfig({
       "#shared": fileURLToPath(new URL("./shared", import.meta.url)),
     },
     include: ["test/**/*.test.ts"],
+    exclude: ["test/browser/**", "test/e2e/**"],
     environment: "node",
     reporters: ["default", "junit"],
     outputFile: { junit: "coverage/junit.xml" },
@@ -39,6 +40,7 @@ export default defineConfig({
     plugins: ["typescript", "unicorn", "oxc", "vue"],
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
     rules: {
+      curly: ["error", "all"],
       "vite-plus/prefer-vite-plus-imports": "error",
       "no-restricted-imports": [
         "error",

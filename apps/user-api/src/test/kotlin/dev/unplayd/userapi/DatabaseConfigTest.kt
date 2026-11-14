@@ -34,6 +34,10 @@ class DatabaseConfigTest {
             base + ("DATABASE_URL" to "jdbc:postgresql://localhost/unplayd?currentSchema=catalog"),
             base + ("DATABASE_URL" to "jdbc:postgresql://localhost/unplayd?password=$password"),
             base + ("DATABASE_USER" to "postgres"),
+            base + ("DATABASE_POOL_SIZE" to "0"),
+            base + ("DATABASE_CONNECTION_TIMEOUT_MS" to "249"),
+            base + ("DATABASE_STATEMENT_TIMEOUT_MS" to "0"),
+            base + ("DATABASE_LOCK_TIMEOUT_MS" to "invalid"),
         ).forEach { values ->
             val failure = assertFailsWith<IllegalArgumentException> { DatabaseConfig.load(values::get) }
             assertFalse(failure.message.orEmpty().contains(password))

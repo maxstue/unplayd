@@ -821,6 +821,100 @@
         },
         "description": "Identity comes only from the verified session token. User IDs in headers, query or body never select the user."
       }
+    },
+    "/library/overview": {
+      "get": {
+        "operationId": "getLibraryOverview",
+        "summary": "Get counts for the complete own library",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryOverview"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        },
+        "description": "Identity comes only from the verified session. Aggregates cover the complete own collection without pagination or catalog requests."
+      }
+    },
+    "/library/platforms": {
+      "get": {
+        "operationId": "getLibraryPlatforms",
+        "summary": "Get distinct own platforms with representative game IDs",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryPlatforms"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.json#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.json#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        },
+        "description": "Identity comes only from the verified session. Aggregates cover the complete own collection without pagination or catalog requests."
+      }
     }
   },
   "security": [
@@ -1020,6 +1114,69 @@
           }
         },
         "required": ["id", "clerkSubject"]
+      },
+      "LibraryOverview": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "statuses": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "backlog": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "playing": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "paused": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "completed": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "dropped": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": ["backlog", "playing", "paused", "completed", "dropped"]
+          }
+        },
+        "required": ["total", "statuses"]
+      },
+      "LibraryPlatforms": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "platformId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "gameId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": ["platformId", "gameId"]
+            }
+          }
+        },
+        "required": ["items"]
       }
     }
   }

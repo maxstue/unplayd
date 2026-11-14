@@ -6,6 +6,10 @@ class DatabaseConfig private constructor(
     val url: String,
     val user: String,
     val password: String,
+    val poolSize: Int,
+    val connectionTimeoutMs: Long,
+    val statementTimeoutMs: Long,
+    val lockTimeoutMs: Long,
 ) {
     companion object {
         fun load(env: (String) -> String? = System::getenv): DatabaseConfig {
@@ -26,7 +30,25 @@ class DatabaseConfig private constructor(
             val user = env("DATABASE_USER") ?: "user_api"
             require(user == "user_api") { "DATABASE_USER must be user_api" }
             val password = requireNotNull(env("DATABASE_PASSWORD")?.takeIf { it.isNotEmpty() }) { "DATABASE_PASSWORD is required" }
-            return DatabaseConfig(url, user, password)
+
+            fun setting(
+                name: String,
+                default: Long,
+                range: LongRange,
+            ): Long {
+                val value = env(name)?.let { requireNotNull(it.toLongOrNull()) { "$name must be an integer" } } ?: default
+                require(value in range) { "$name is outside the supported range" }
+                return value
+            }
+            return DatabaseConfig(
+                url,
+                user,
+                password,
+                setting("DATABASE_POOL_SIZE", 10, 1L..50L).toInt(),
+                setting("DATABASE_CONNECTION_TIMEOUT_MS", 1000, 250L..30000L),
+                setting("DATABASE_STATEMENT_TIMEOUT_MS", 2000, 1L..30000L),
+                setting("DATABASE_LOCK_TIMEOUT_MS", 1000, 1L..30000L),
+            )
         }
     }
 }

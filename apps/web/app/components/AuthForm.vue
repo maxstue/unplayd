@@ -4,6 +4,18 @@ const props = defineProps<{ mode: "sign-in" | "sign-up" }>();
 const incoming = useSignIn();
 const outgoing = useSignUp();
 const { isSignedIn } = useAuth();
+let navigation: Promise<void> | undefined;
+function completeNavigation() {
+  navigation ??= Promise.resolve()
+    .then(async () => {
+      await navigateTo("/dashboard");
+    })
+    .catch((cause: unknown) => {
+      navigation = undefined;
+      throw cause;
+    });
+  return navigation;
+}
 const {
   step,
   email,
@@ -31,56 +43,86 @@ const {
     setActive: incoming.setActive,
     isLoaded: computed(() => incoming.isLoaded.value && outgoing.isLoaded.value),
   },
-  async () => {
-    await navigateTo("/dashboard");
-  },
+  completeNavigation,
 );
 watch(
   isSignedIn,
   (signedIn) => {
-    if (signedIn) void navigateTo("/dashboard");
+    if (signedIn && !busy.value && step.value !== "blocked") {
+      void completeNavigation();
+    }
   },
   { immediate: true },
 );
 const heading = computed(() => {
-  if (step.value === "verify-email") return "Bestätige deine E-Mail.";
-  if (step.value === "second-factor") return "Ein letzter Sicherheitscheck.";
-  if (["recover", "reset", "renew"].includes(step.value)) return "Ein neues Passwort.";
-  if (step.value === "blocked") return "Noch ein Schritt fehlt.";
+  if (step.value === "verify-email") {
+    return "Bestätige deine E-Mail.";
+  }
+  if (step.value === "second-factor") {
+    return "Ein letzter Sicherheitscheck.";
+  }
+  if (["recover", "reset", "renew"].includes(step.value)) {
+    return "Ein neues Passwort.";
+  }
+  if (step.value === "blocked") {
+    return "Noch ein Schritt fehlt.";
+  }
   return props.mode === "sign-up" ? "Dein Backlog. Dein Platz." : "Willkommen zurück.";
 });
 function secondFactorDescription() {
-  if (factor.value?.strategy === "totp")
+  if (factor.value?.strategy === "totp") {
     return "Gib den aktuellen Code aus deiner Authenticator-App ein.";
-  if (factor.value?.strategy === "backup_code")
+  }
+  if (factor.value?.strategy === "backup_code") {
     return "Gib einen deiner unbenutzten Wiederherstellungscodes ein.";
-  if (factor.value?.strategy === "passkey") return "Bestätige die Anmeldung mit deinem Passkey.";
+  }
+  if (factor.value?.strategy === "passkey") {
+    return "Bestätige die Anmeldung mit deinem Passkey.";
+  }
   const recipient =
     factor.value && "safeIdentifier" in factor.value ? factor.value.safeIdentifier : "";
   const recipientSuffix = recipient ? ` (${recipient})` : "";
   return `Gib den Code aus deiner ${codeDelivery.value} ein${recipientSuffix}.`;
 }
 const description = computed(() => {
-  if (step.value === "verify-email")
+  if (step.value === "verify-email") {
     return `Gib den Code ein, den wir an ${email.value} geschickt haben.`;
-  if (step.value === "second-factor") return secondFactorDescription();
-  if (step.value === "recover")
+  }
+  if (step.value === "second-factor") {
+    return secondFactorDescription();
+  }
+  if (step.value === "recover") {
     return "Wir schicken dir einen Code, mit dem du dein Passwort zurücksetzen kannst.";
-  if (step.value === "reset")
+  }
+  if (step.value === "reset") {
     return `Gib den Code für ${email.value} ein und wähle dein neues Passwort.`;
-  if (step.value === "renew") return "Wähle ein neues Passwort, um die Anmeldung abzuschließen.";
-  if (step.value === "blocked") return "Dein Konto benötigt einen zusätzlichen Sicherheitsschritt.";
+  }
+  if (step.value === "renew") {
+    return "Wähle ein neues Passwort, um die Anmeldung abzuschließen.";
+  }
+  if (step.value === "blocked") {
+    return "Dein Konto benötigt einen zusätzlichen Sicherheitsschritt.";
+  }
   return props.mode === "sign-up"
     ? "Erstelle dein Konto und bring Ordnung in deine Spiele."
     : "Deine Spiele warten schon auf dich.";
 });
 const buttonLabel = computed(() => {
-  if (busy.value) return "Einen Moment …";
-  if (step.value === "verify-email") return "E-Mail bestätigen";
-  if (step.value === "second-factor")
+  if (busy.value) {
+    return "Einen Moment …";
+  }
+  if (step.value === "verify-email") {
+    return "E-Mail bestätigen";
+  }
+  if (step.value === "second-factor") {
     return needsCode.value ? "Anmeldung bestätigen" : "Mit Passkey bestätigen";
-  if (step.value === "recover") return "Code anfordern";
-  if (["reset", "renew"].includes(step.value)) return "Passwort speichern";
+  }
+  if (step.value === "recover") {
+    return "Code anfordern";
+  }
+  if (["reset", "renew"].includes(step.value)) {
+    return "Passwort speichern";
+  }
   return props.mode === "sign-up" ? "Konto erstellen" : "Anmelden";
 });
 const factorLabels: Record<string, string> = {

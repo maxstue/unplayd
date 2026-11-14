@@ -20,17 +20,21 @@ type SearchPolicy struct {
 	RefreshTimeout time.Duration
 	// Cooldown suspends provider refreshes after a failed refresh.
 	Cooldown time.Duration
+	// MaxConcurrentRefreshes bounds distinct provider searches, including work
+	// continuing after the originating request returns. Zero uses the default.
+	MaxConcurrentRefreshes int
 }
 
 // DefaultSearchPolicy refreshes a search once a day and keeps requests within
 // the service clients' 3-second budget.
 func DefaultSearchPolicy() SearchPolicy {
-	return SearchPolicy{FreshFor: 24 * time.Hour, Wait: 2 * time.Second, RefreshTimeout: 20 * time.Second, Cooldown: 30 * time.Second}
+	return SearchPolicy{FreshFor: 24 * time.Hour, Wait: 2 * time.Second, RefreshTimeout: 20 * time.Second, Cooldown: 30 * time.Second, MaxConcurrentRefreshes: 8}
 }
 
 var (
-	errRefreshPending = errors.New("provider refresh still running")
-	errCoolingDown    = errors.New("provider refreshes are suspended after a failure")
+	errRefreshPending  = errors.New("provider refresh still running")
+	errCoolingDown     = errors.New("provider refreshes are suspended after a failure")
+	errRefreshCapacity = errors.New("provider refresh capacity reached")
 )
 
 // Service answers catalog reads from stored games. Searches that the provider
@@ -60,6 +64,9 @@ type refreshCall struct {
 // NewService returns a catalog service. A nil importer answers every search
 // from stored games only.
 func NewService(store *Store, importer *Importer, policy SearchPolicy, logger *slog.Logger) *Service {
+	if policy.MaxConcurrentRefreshes <= 0 {
+		policy.MaxConcurrentRefreshes = DefaultSearchPolicy().MaxConcurrentRefreshes
+	}
 	return &Service{
 		store: store, importer: importer, policy: policy, logger: logger, now: time.Now,
 		inflight: map[string]*refreshCall{},
@@ -151,7 +158,7 @@ func (s *Service) refresh(ctx context.Context, query localQuery) (providerErr, e
 }
 
 // start joins the running refresh of the same search or starts a new one,
-// unless refreshes are suspended after a failure.
+// unless refreshes are suspended after a failure or admission capacity is full.
 func (s *Service) start(ctx context.Context, query localQuery) (*refreshCall, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -163,6 +170,9 @@ func (s *Service) start(ctx context.Context, query localQuery) (*refreshCall, er
 	}
 	if s.now().Before(s.coolingUntil) {
 		return nil, errCoolingDown
+	}
+	if len(s.inflight) >= s.policy.MaxConcurrentRefreshes {
+		return nil, errRefreshCapacity
 	}
 	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.policy.RefreshTimeout)
 	call := &refreshCall{done: make(chan struct{}), cancel: cancel}
@@ -188,7 +198,7 @@ func (s *Service) start(ctx context.Context, query localQuery) (*refreshCall, er
 
 // fetch stores the provider's matches for query and records the search.
 func (s *Service) fetch(ctx context.Context, query localQuery) error {
-	matches, _, err := s.importer.fetch(ctx, query.text, query.filter, maxSearchLimit)
+	matches, err := s.importer.fetch(ctx, query.text, query.filter, maxSearchLimit)
 	if err != nil {
 		return err
 	}

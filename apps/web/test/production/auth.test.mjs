@@ -42,8 +42,9 @@ before(async () => {
   let diagnostic = "";
   server.stderr.on("data", (data) => {
     diagnostic += data.toString();
-    for (const value of Object.values(privateValues))
+    for (const value of Object.values(privateValues)) {
       diagnostic = diagnostic.replaceAll(value, "[redacted]");
+    }
   });
   await new Promise((resolveReady, reject) => {
     const timeout = setTimeout(
@@ -80,8 +81,9 @@ after(async () => {
 });
 
 function excludesSecrets(text) {
-  for (const value of Object.values(privateValues))
+  for (const value of Object.values(privateValues)) {
     assert.equal(text.includes(value), false, "Private runtime value crossed the browser boundary");
+  }
 }
 
 test("built app keeps public HTML, redirects and API errors free of private runtime credentials", async () => {
@@ -90,6 +92,7 @@ test("built app keeps public HTML, redirects and API errors free of private runt
     "/sign-in",
     "/sign-up",
     "/dashboard",
+    "/library",
     "/api/health",
     "/api/me",
     "/api/library",
@@ -104,12 +107,14 @@ test("built app keeps public HTML, redirects and API errors free of private runt
     const text = await response.text();
     excludesSecrets(text);
     excludesSecrets(JSON.stringify([...response.headers]));
-    if (path === "/dashboard") {
+    if (path === "/dashboard" || path === "/library") {
       assert.equal(response.status, 302);
       assert.equal(new URL(response.headers.get("location"), baseUrl).pathname, "/sign-in");
-    } else if (path.startsWith("/api/") && path !== "/api/health")
+    } else if (path.startsWith("/api/") && path !== "/api/health") {
       assert.equal(response.status, 401);
-    else assert.equal(response.status, 200);
+    } else {
+      assert.equal(response.status, 200);
+    }
     assert.equal(response.headers.get("cache-control"), "no-store");
     assert.doesNotMatch(text, /"secretKey"\s*:/);
     assert.doesNotMatch(text, /"catalogServiceToken"\s*:/);
@@ -137,8 +142,11 @@ test("built browser files contain no private runtime credentials", async () => {
   async function inspect(directory) {
     for (const item of await readdir(directory, { withFileTypes: true })) {
       const file = join(directory, item.name);
-      if (item.isDirectory()) await inspect(file);
-      else excludesSecrets(await readFile(file, "utf8"));
+      if (item.isDirectory()) {
+        await inspect(file);
+      } else {
+        excludesSecrets(await readFile(file, "utf8"));
+      }
     }
   }
   await inspect(join(build, "public"));

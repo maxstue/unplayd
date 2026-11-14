@@ -3,7 +3,9 @@ import { createError, defineEventHandler, getRequestURL, type EventHandler } fro
 import { useRuntimeConfig } from "#imports";
 
 export default defineEventHandler(async (event) => {
-  if (getRequestURL(event).pathname === "/api/health") return;
+  if (getRequestURL(event).pathname === "/api/health") {
+    return;
+  }
   const config = useRuntimeConfig(event);
   try {
     // SDK 3.1.17 bundles duplicate H3 declarations; its runtime uses Nuxt's H3.

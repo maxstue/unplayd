@@ -25,7 +25,7 @@ class PersistedIdentityTest {
         testApplication {
             UserApiTestDatabase.start().use { database ->
                 val config = database.config
-                val store = JdbcUserStore(config)
+                val store = JdbcUserStore(database.dataSource)
                 val firstSubject = "user_${UUID.randomUUID().toString().replace("-", "")}"
                 val secondSubject = "user_${UUID.randomUUID().toString().replace("-", "")}"
                 val first = store.resolve(firstSubject)
@@ -54,7 +54,19 @@ class PersistedIdentityTest {
                         mapOf("CLERK_ISSUER" to "https://clerk.test", "CLERK_AUTHORIZED_PARTY" to "http://localhost:8444")::get,
                     )
                 val tokens = SessionTokens()
-                application { module(auth, store, auth.verifier(tokens.provider)) }
+                application {
+                    module(
+                        auth,
+                        store,
+                        auth.verifier(tokens.provider),
+                        dev.unplayd.userapi.library.LibraryService(
+                            dev.unplayd.userapi.library
+                                .JdbcLibraryStore(database.dataSource),
+                            dev.unplayd.userapi.catalog
+                                .CatalogClient { _, _ -> error("Catalog is not used for identity reads") },
+                        ),
+                    )
+                }
                 val own = client.get("/library/$game") { header(HttpHeaders.Authorization, "Bearer ${tokens.token(firstSubject)}") }
                 assertEquals(HttpStatusCode.OK, own.status)
                 assertEquals(

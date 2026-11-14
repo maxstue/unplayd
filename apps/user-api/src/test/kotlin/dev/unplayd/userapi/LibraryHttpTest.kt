@@ -3,8 +3,8 @@ package dev.unplayd.userapi
 import dev.unplayd.userapi.auth.AuthConfig
 import dev.unplayd.userapi.catalog.HttpCatalogClient
 import dev.unplayd.userapi.identity.JdbcUserStore
-import dev.unplayd.userapi.identity.LibraryEntry
 import dev.unplayd.userapi.library.JdbcLibraryStore
+import dev.unplayd.userapi.library.LibraryEntry
 import dev.unplayd.userapi.library.LibraryPage
 import dev.unplayd.userapi.library.LibraryService
 import io.ktor.client.request.header
@@ -22,6 +22,9 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.sql.Connection
 import java.util.UUID
 import kotlin.test.Test
@@ -90,6 +93,75 @@ class LibraryHttpTest {
                 for (table in listOf("game_statuses", "favorites", "ratings", "notes")) {
                     assertEquals(0, db.count("SELECT count(*) FROM user_data.$table"))
                 }
+            }
+        }
+
+    @Test
+    fun `overview and platform reads aggregate the complete own collection without catalog calls`() =
+        withLibrary { fixture ->
+            val empty = Json.parseToJsonElement(request(HttpMethod.Get, "/library/overview").bodyAsText()).jsonObject
+            assertEquals(0, empty.getValue("total").jsonPrimitive.int)
+            assertEquals(5, empty.getValue("statuses").jsonObject.size)
+            val user = JdbcUserStore(fixture.database.dataSource).resolve(first)
+            val foreign = JdbcUserStore(fixture.database.dataSource).resolve(second)
+            val platform = UUID.randomUUID()
+            val otherPlatform = UUID.randomUUID()
+            fixture.database.connection().use { db ->
+                repeat(125) { index ->
+                    val entry = UUID.randomUUID()
+                    db.execute(
+                        "INSERT INTO user_data.library_entries(id,user_id,game_id,platform_id,ownership,snapshot_title) VALUES (?,?,?,?,'owned','Game')",
+                        entry,
+                        user.id,
+                        UUID.randomUUID(),
+                        if (index ==
+                            124
+                        ) {
+                            otherPlatform
+                        } else {
+                            platform
+                        },
+                    )
+                    db.execute(
+                        "INSERT INTO user_data.game_statuses(library_entry_id,status) VALUES (?,?)",
+                        entry,
+                        if (index % 2 ==
+                            0
+                        ) {
+                            "playing"
+                        } else {
+                            "backlog"
+                        },
+                    )
+                }
+                val entry = UUID.randomUUID()
+                db.execute(
+                    "INSERT INTO user_data.library_entries(id,user_id,game_id,platform_id,ownership,snapshot_title) VALUES (?,?,?,?,'owned','Foreign')",
+                    entry,
+                    foreign.id,
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
+                )
+                db.execute("INSERT INTO user_data.game_statuses(library_entry_id,status) VALUES (?,'completed')", entry)
+            }
+            val overview =
+                Json.decodeFromString<dev.unplayd.userapi.library.LibraryOverview>(
+                    request(HttpMethod.Get, "/library/overview").bodyAsText(),
+                )
+            assertEquals(125, overview.total)
+            assertEquals(mapOf("backlog" to 62, "playing" to 63, "paused" to 0, "completed" to 0, "dropped" to 0), overview.statuses)
+            val platforms =
+                Json.decodeFromString<dev.unplayd.userapi.library.LibraryPlatforms>(
+                    request(HttpMethod.Get, "/library/platforms").bodyAsText(),
+                )
+            assertEquals(setOf(platform.toString(), otherPlatform.toString()), platforms.items.map { it.platformId }.toSet())
+            assertEquals(2, platforms.items.size)
+            platforms.items.forEach { item ->
+                assertEquals(item.platformId, request(HttpMethod.Get, "/library/${item.gameId}").entry().platformId)
+            }
+            assertEquals(0, fixture.catalog.requests.size)
+            for (path in listOf("/library/overview", "/library/platforms")) {
+                assertEquals(HttpStatusCode.Unauthorized, request(HttpMethod.Get, path, subject = null).status)
             }
         }
 
@@ -289,13 +361,13 @@ class LibraryHttpTest {
         UserApiTestDatabase.start().use { database ->
             CatalogStub().use { catalog ->
                 testApplication {
-                    val users = JdbcUserStore(database.config)
+                    val users = JdbcUserStore(database.dataSource)
                     application {
                         module(
                             auth,
                             users,
                             auth.verifier(tokens.provider),
-                            LibraryService(JdbcLibraryStore(database.config), users, HttpCatalogClient(catalog.config())),
+                            LibraryService(JdbcLibraryStore(database.dataSource), HttpCatalogClient(catalog.config())),
                         )
                     }
                     block(Fixture(database, catalog))

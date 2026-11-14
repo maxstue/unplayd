@@ -1,13 +1,10 @@
 package dev.unplayd.userapi.library
 
 import dev.unplayd.userapi.catalog.CatalogClient
-import dev.unplayd.userapi.identity.GameSnapshot
-import dev.unplayd.userapi.identity.UserStore
 import java.util.UUID
 
 class LibraryService(
-    private val store: JdbcLibraryStore,
-    private val users: UserStore,
+    private val store: LibraryStore,
     private val catalog: CatalogClient,
 ) {
     suspend fun add(
@@ -17,7 +14,7 @@ class LibraryService(
     ): AddedEntry {
         request.validate()
         val id = uuid(request.gameId)
-        users.findEntry(userId, id)?.let {
+        store.findEntry(userId, id)?.let {
             ensureMatching(it, request)
             return AddedEntry(it, false)
         }
@@ -28,6 +25,15 @@ class LibraryService(
         }
         return store.add(userId, request, GameSnapshot(game.title, game.coverUrl))
     }
+
+    suspend fun findEntry(
+        userId: UUID,
+        gameId: UUID,
+    ) = store.findEntry(userId, gameId)
+
+    suspend fun overview(userId: UUID) = store.overview(userId)
+
+    suspend fun platforms(userId: UUID) = store.platforms(userId)
 
     suspend fun list(
         userId: UUID,

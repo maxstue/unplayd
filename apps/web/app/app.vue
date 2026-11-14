@@ -2,7 +2,7 @@
 const { userId } = useAuth();
 const route = useRoute();
 const isAuthPage = computed(() => /^\/sign-(in|up)\/?$/.test(route.path));
-const knownEntries = useState<Record<string, boolean>>("known-library-entries", () => ({}));
+const knownEntries = useKnownEntries();
 watch(userId, (current, previous) => {
   if (previous && current !== previous) {
     knownEntries.value = {};
@@ -26,7 +26,10 @@ watch(userId, (current, previous) => {
             "
             >Spiele entdecken</NuxtLink
           >
-          <Show when="signed-in"><NuxtLink to="/dashboard">Mein Konto</NuxtLink></Show>
+          <Show when="signed-in"
+            ><NuxtLink to="/dashboard">Dashboard</NuxtLink
+            ><NuxtLink to="/library">Bibliothek</NuxtLink></Show
+          >
         </nav>
         <Show when="signed-out">
           <NuxtLink v-if="!isAuthPage" to="/sign-in" class="button secondary">Anmelden</NuxtLink>

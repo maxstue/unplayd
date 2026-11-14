@@ -1,22 +1,25 @@
 <script setup lang="ts">
 import { kindLabels, type GameDetailView } from "#shared/catalog";
+import { libraryReturnPath, ownershipLabels, type LibraryEntryView } from "#shared/library";
 definePageMeta({ middleware: "auth", key: (route) => route.params.gameId as string });
 const route = useRoute();
+const returnTo = computed(() => libraryReturnPath(route.query.returnTo));
+const backLabel = computed(() => {
+  if (!returnTo.value) {
+    return "Zurück zur Suche";
+  }
+  return returnTo.value.startsWith("/library") ? "Zurück zur Bibliothek" : "Zurück zum Dashboard";
+});
 const id = route.params.gameId as string;
-const {
-  data: detail,
-  status,
-  error,
-  refresh,
-} = await useLazyFetch<GameDetailView>(`/api/games/${id}`);
+const { data: detail, status, error, refresh } = useLazyFetch<GameDetailView>(`/api/games/${id}`);
 const {
   data: entry,
   status: entryStatus,
   error: entryError,
   refresh: refreshEntry,
-} = await useLazyFetch(`/api/library/${id}`);
-const knownEntries = useState<Record<string, boolean>>("known-library-entries", () => ({}));
-const ownership = ref<"owned" | "wishlist" | "subscription">("owned");
+} = useLazyFetch<LibraryEntryView>(`/api/library/${id}`);
+const knownEntries = useKnownEntries();
+const ownership = ref<keyof typeof ownershipLabels>("owned");
 const platformId = ref("");
 const saving = ref(false);
 const saveError = ref("");
@@ -25,7 +28,9 @@ const missingEntry = computed(() => entryError.value?.statusCode === 404);
 watch(
   entry,
   (value) => {
-    if (value) knownEntries.value[id] = true;
+    if (value) {
+      knownEntries.value[id] = true;
+    }
   },
   { immediate: true },
 );
@@ -38,8 +43,9 @@ async function addToLibrary() {
     added.value ||
     !missingEntry.value ||
     !detail.value?.game.isActive
-  )
+  ) {
     return;
+  }
   saving.value = true;
   saveError.value = "";
   try {
@@ -57,13 +63,14 @@ async function addToLibrary() {
     saving.value = false;
   }
 }
-const ownershipLabels = { owned: "In Besitz", wishlist: "Wunschliste", subscription: "Abonnement" };
 </script>
 
 <template>
   <section>
-    <NuxtLink :to="{ path: '/', query: { query: route.query.query } }" class="back-link"
-      >Zurück zur Suche</NuxtLink
+    <NuxtLink
+      :to="returnTo ?? { path: '/', query: { query: route.query.query } }"
+      class="back-link"
+      >{{ backLabel }}</NuxtLink
     >
     <output v-if="status === 'pending'" class="state-message">
       Spieldetails werden geladen …
@@ -91,7 +98,10 @@ const ownershipLabels = { owned: "In Besitz", wishlist: "Wunschliste", subscript
         <div class="detail-main">
           <NuxtLink
             v-if="detail.game.parent"
-            :to="{ path: `/games/${detail.game.parent.id}`, query: { query: route.query.query } }"
+            :to="{
+              path: `/games/${detail.game.parent.id}`,
+              query: { query: route.query.query, returnTo: returnTo ?? undefined },
+            }"
             >Hauptspiel: {{ detail.game.parent.title }}</NuxtLink
           >
           <h1>{{ detail.game.title }}</h1>
@@ -168,9 +178,13 @@ const ownershipLabels = { owned: "In Besitz", wishlist: "Wunschliste", subscript
           <h3>{{ kindLabels[group.kind] ?? group.kind }}</h3>
           <ul class="related-list">
             <li v-for="child in group.games" :key="child.id">
-              <NuxtLink :to="{ path: `/games/${child.id}`, query: { query: route.query.query } }">{{
-                child.title
-              }}</NuxtLink>
+              <NuxtLink
+                :to="{
+                  path: `/games/${child.id}`,
+                  query: { query: route.query.query, returnTo: returnTo ?? undefined },
+                }"
+                >{{ child.title }}</NuxtLink
+              >
             </li>
           </ul>
         </section>

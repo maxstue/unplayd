@@ -30,7 +30,7 @@ async function submitSearch(term: string) {
 async function openSuggestion(game: { id: string }, term: string) {
   await navigateTo({ path: `/games/${game.id}`, query: { query: term } });
 }
-const knownEntries = useState<Record<string, boolean>>("known-library-entries", () => ({}));
+const knownEntries = useKnownEntries();
 useHead({ title: "Spiele entdecken · Unplayd" });
 </script>
 

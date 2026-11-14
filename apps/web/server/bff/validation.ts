@@ -10,22 +10,32 @@ function invalid(): never {
   throw new InvalidInput();
 }
 function text(value: unknown, min: number, max: number) {
-  if (typeof value !== "string" || value.length < min || value.length > max) return invalid();
+  if (typeof value !== "string" || value.length < min || value.length > max) {
+    return invalid();
+  }
   return value;
 }
 function uuid(value: unknown) {
   const result = text(value, 36, 36);
-  if (!uuidPattern.test(result)) return invalid();
+  if (!uuidPattern.test(result)) {
+    return invalid();
+  }
   return result.toLowerCase();
 }
 function choice<T extends string>(value: unknown, options: readonly T[]) {
-  if (!options.includes(value as T)) return invalid();
+  if (!options.includes(value as T)) {
+    return invalid();
+  }
   return value as T;
 }
 function limit(value: unknown) {
-  if (value === undefined) return undefined;
+  if (value === undefined) {
+    return undefined;
+  }
   const result = Number(text(value, 1, 2));
-  if (!Number.isInteger(result) || result < 1 || result > 50) return invalid();
+  if (!Number.isInteger(result) || result < 1 || result > 50) {
+    return invalid();
+  }
   return result;
 }
 
@@ -47,7 +57,9 @@ export function catalogQuery(event: H3Event) {
   const requestedKinds = Array.isArray(q.kind) ? q.kind : [q.kind];
   const kind =
     q.kind === undefined ? undefined : requestedKinds.map((value) => choice(value, kinds));
-  if (kind && (kind.length > 8 || new Set(kind).size !== kind.length)) return invalid();
+  if (kind && (kind.length > 8 || new Set(kind).size !== kind.length)) {
+    return invalid();
+  }
   return {
     query: text(q.query, 2, 200),
     platformId: q.platformId === undefined ? undefined : uuid(q.platformId),
@@ -58,11 +70,15 @@ export function catalogQuery(event: H3Event) {
 }
 export function suggestionQuery(event: H3Event) {
   const q = getQuery(event);
-  if (Object.keys(q).some((key) => key !== "query")) return invalid();
+  if (Object.keys(q).some((key) => key !== "query")) {
+    return invalid();
+  }
   return { query: text(q.query, 2, 200) };
 }
 async function body(event: H3Event, fields: string[]) {
-  if (getHeader(event, "content-type")?.split(";")[0] !== "application/json") return invalid();
+  if (getHeader(event, "content-type")?.split(";")[0] !== "application/json") {
+    return invalid();
+  }
   let data: unknown;
   try {
     data = await readBody(event);
@@ -74,8 +90,9 @@ async function body(event: H3Event, fields: string[]) {
     typeof data !== "object" ||
     Array.isArray(data) ||
     Object.keys(data).some((key) => !fields.includes(key))
-  )
+  ) {
     return invalid();
+  }
   return data as Record<string, unknown>;
 }
 export async function addEntryBody(event: H3Event) {
@@ -93,9 +110,12 @@ export async function statusBody(event: H3Event) {
 }
 export async function batchBody(event: H3Event) {
   const data = await body(event, ["gameIds"]);
-  if (!Array.isArray(data.gameIds) || data.gameIds.length < 1 || data.gameIds.length > 100)
+  if (!Array.isArray(data.gameIds) || data.gameIds.length < 1 || data.gameIds.length > 100) {
     return invalid();
+  }
   const gameIds = data.gameIds.map(uuid);
-  if (new Set(gameIds).size !== gameIds.length) return invalid();
+  if (new Set(gameIds).size !== gameIds.length) {
+    return invalid();
+  }
   return { gameIds };
 }

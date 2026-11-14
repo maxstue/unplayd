@@ -218,38 +218,47 @@ func TestChildCountsAndDetailGroupChildrenByKind(t *testing.T) {
 		t.Fatalf("resident evil counts = %+v", counts)
 	}
 
-	t.Run("parent detail", func(t *testing.T) {
-		detail, err := store.Detail(t.Context(), parent.ID)
-		if err != nil {
-			t.Fatal(err)
+	t.Run("parent detail", func(t *testing.T) { assertGroupedParentDetail(t, store, parent) })
+	t.Run("child detail", func(t *testing.T) { assertChildDetail(t, store, remake, original) })
+	t.Run("unknown and malformed IDs", func(t *testing.T) { assertUnknownDetails(t, store) })
+}
+
+func assertGroupedParentDetail(t *testing.T, store *Store, parent Game) {
+	t.Helper()
+	detail, err := store.Detail(t.Context(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := groupedTitles(t, detail, &parent)
+	want := [][]string{
+		{complete.Title},
+		{bloodAndWine.Title, heartsOfStone.Title},
+		{nextGen.Title},
+	}
+	if detail.Game.ID != parent.ID || !slices.Equal(groupKinds(detail), []Kind{KindEdition, KindExpansion, KindUpdate}) || !slices.EqualFunc(got, want, slices.Equal) {
+		t.Fatalf("detail children = %v, want %v", got, want)
+	}
+}
+
+func assertChildDetail(t *testing.T, store *Store, remake, original Game) {
+	t.Helper()
+	detail, err := store.Detail(t.Context(), remake.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertParent(t, detail.Game, &original)
+	if detail.Game.Kind != KindRemake || len(detail.Children) != 0 {
+		t.Fatalf("child detail = %+v", detail)
+	}
+}
+
+func assertUnknownDetails(t *testing.T, store *Store) {
+	t.Helper()
+	for _, id := range []string{"10000000-0000-4000-8000-000000000099", "not-a-uuid"} {
+		if _, err := store.Detail(t.Context(), id); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("Detail(%q) err = %v, want ErrNotFound", id, err)
 		}
-		got := groupedTitles(t, detail, &parent)
-		want := [][]string{
-			{complete.Title},
-			{bloodAndWine.Title, heartsOfStone.Title},
-			{nextGen.Title},
-		}
-		if detail.Game.ID != parent.ID || !slices.Equal(groupKinds(detail), []Kind{KindEdition, KindExpansion, KindUpdate}) || !slices.EqualFunc(got, want, slices.Equal) {
-			t.Fatalf("detail children = %v, want %v", got, want)
-		}
-	})
-	t.Run("child detail", func(t *testing.T) {
-		detail, err := store.Detail(t.Context(), remake.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertParent(t, detail.Game, &original)
-		if detail.Game.Kind != KindRemake || len(detail.Children) != 0 {
-			t.Fatalf("child detail = %+v", detail)
-		}
-	})
-	t.Run("unknown and malformed IDs", func(t *testing.T) {
-		for _, id := range []string{"10000000-0000-4000-8000-000000000099", "not-a-uuid"} {
-			if _, err := store.Detail(t.Context(), id); !errors.Is(err, ErrNotFound) {
-				t.Fatalf("Detail(%q) err = %v, want ErrNotFound", id, err)
-			}
-		}
-	})
+	}
 }
 
 func TestImporterCompletesChainsAndLoadsChildrenWithoutNPlusOne(t *testing.T) {
@@ -297,36 +306,37 @@ var searchable = []SourceGame{witcher, goty, complete, anniversary, bloodAndWine
 func searchHits(t *testing.T, store *Store, matches []SourceGame, categories ...Category) []SearchHit {
 	t.Helper()
 	source := &fakeSource{games: matches, known: searchable}
-	hits, err := NewImporter(source, store).Search(t.Context(), "witcher 3", categories, 20)
+	page, err := newTestService(store, source, testPolicy).Search(t.Context(), SearchRequest{Query: "provider-only", Categories: categories, Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return hits
+	return page.Hits
 }
 
-func TestImporterSearchBundlesHitsUnderParents(t *testing.T) {
-	store, _ := newTestStore(t)
-
+func TestSearchBundlesHitsUnderParents(t *testing.T) {
 	t.Run("without filter every parent appears once with matched children", func(t *testing.T) {
+		store, _ := newTestStore(t)
 		hits := searchHits(t, store, []SourceGame{witcher, witcherBundle, nextGen, goty, bloodAndWine, heartsOfStone, anniversary})
 		if !slices.Equal(hitTitles(hits), []string{witcher.Title, witcherBundle.Title}) {
 			t.Fatalf("hits = %+v", hits)
 		}
-		if want := []string{nextGen.Title, goty.Title, bloodAndWine.Title, heartsOfStone.Title, anniversary.Title}; !slices.Equal(titles(hits[0].MatchedChildren), want) {
+		if want := []string{bloodAndWine.Title, anniversary.Title, nextGen.Title, goty.Title, heartsOfStone.Title}; !slices.Equal(titles(hits[0].MatchedChildren), want) {
 			t.Fatalf("matched children = %v, want %v", titles(hits[0].MatchedChildren), want)
 		}
 		want := []KindCount{{KindEdition, 3}, {KindExpansion, 2}, {KindUpdate, 1}}
 		if !slices.Equal(hits[0].ChildCounts, want) || len(hits[1].ChildCounts) != 0 {
-			t.Fatalf("child counts = %+v / %+v, want %+v", hits[0].ChildCounts, hits[1].ChildCounts, want)
+			t.Fatalf("child counts = %+v / %+v, want %+v", hits[0].ChildCounts, hits[0].ChildCounts, want)
 		}
 	})
 	t.Run("a child-only match still yields its parent", func(t *testing.T) {
+		store, _ := newTestStore(t)
 		hits := searchHits(t, store, []SourceGame{bloodAndWine})
 		if !slices.Equal(hitTitles(hits), []string{witcher.Title}) || !slices.Equal(titles(hits[0].MatchedChildren), []string{bloodAndWine.Title}) {
 			t.Fatalf("hits = %+v", hits)
 		}
 	})
 	t.Run("remake bundles under the original", func(t *testing.T) {
+		store, _ := newTestStore(t)
 		hits := searchHits(t, store, []SourceGame{re2Remake, re2})
 		if len(hits) != 1 || hits[0].Game.Kind != KindGame || hits[0].MatchedChildren[0].Kind != KindRemake {
 			t.Fatalf("hits = %+v", hits)
@@ -334,10 +344,9 @@ func TestImporterSearchBundlesHitsUnderParents(t *testing.T) {
 	})
 }
 
-func TestImporterSearchFiltersByKind(t *testing.T) {
-	store, _ := newTestStore(t)
-
+func TestSearchFiltersByKind(t *testing.T) {
 	t.Run("kind filter yields a flat list with parent references", func(t *testing.T) {
+		store, _ := newTestStore(t)
 		hits := searchHits(t, store, []SourceGame{bloodAndWine, heartsOfStone}, CategoryExpansion)
 		if len(hits) != 2 {
 			t.Fatalf("hits = %+v", hits)
@@ -345,8 +354,9 @@ func TestImporterSearchFiltersByKind(t *testing.T) {
 		assertChildHits(t, hits, KindExpansion, witcher.Title)
 	})
 	t.Run("filters are forwarded and applied locally", func(t *testing.T) {
+		store, _ := newTestStore(t)
 		source := &fakeSource{games: []SourceGame{witcher, nextGen, bloodAndWine}, known: searchable}
-		hits := must(NewImporter(source, store).Search(t.Context(), "witcher 3", []Category{CategoryDLC, CategoryDLC}, 20))
+		hits := searchPage(t, newTestService(store, source, testPolicy), SearchRequest{Query: "provider-only", Categories: []Category{CategoryDLC}}).Hits
 		if !slices.Equal(source.filter.Kinds, []Kind{KindDLC, KindPack, KindUpdate}) || source.filter.Parents {
 			t.Fatalf("provider filter = %+v", source.filter)
 		}
@@ -355,6 +365,7 @@ func TestImporterSearchFiltersByKind(t *testing.T) {
 		}
 	})
 	t.Run("game filter yields parents with counts only", func(t *testing.T) {
+		store, _ := newTestStore(t)
 		hits := searchHits(t, store, []SourceGame{witcher, witcherBundle, bloodAndWine}, CategoryGame)
 		if !slices.Equal(hitTitles(hits), []string{witcher.Title, witcherBundle.Title}) || len(hits[0].ChildCounts) == 0 {
 			t.Fatalf("game hits = %+v", hits)

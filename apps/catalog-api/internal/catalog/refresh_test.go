@@ -75,70 +75,96 @@ func TestConcurrentRefreshClaimsHaveOneOwner(t *testing.T) {
 		t.Fatalf("owners=%d", wins)
 	}
 }
+
+type refreshOutcomeCase struct {
+	name                            string
+	providerErr                     error
+	missing, permanent, credentials bool
+	want                            string
+}
+
 func TestRefreshWorkerOutcomes(t *testing.T) {
-	for _, tc := range []struct {
-		name                            string
-		providerErr                     error
-		missing, permanent, credentials bool
-		want                            string
-	}{
-		{name: "success", want: "pending"}, {name: "retry", providerErr: errors.New("offline"), want: "pending"},
+	for _, tc := range []refreshOutcomeCase{
+		{name: "success", want: "pending"},
+		{name: "retry", providerErr: errors.New("offline"), want: "pending"},
 		{name: "permanent", providerErr: errors.New("rejected"), permanent: true, want: "failed"},
 		{name: "credentials pause", providerErr: errors.New("credentials"), credentials: true, want: "pending"},
 		{name: "missing", missing: true, want: "failed"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store, db := newTestStore(t)
-			upsertOne(t, store, zelda)
-			dueRefresh(t, db)
-			source := &fakeSource{games: []SourceGame{zelda}, err: tc.providerErr}
-			if tc.missing {
-				source.games = nil
-			}
-			ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
-			defer cancel()
-			p := DefaultRefreshPolicy()
-			p.Poll = time.Millisecond
-			err := store.RunRefresh(ctx, NewImporter(source, store), p, func(error) bool { return tc.permanent }, func(error) bool { return tc.credentials }, slog.New(slog.DiscardHandler))
-			if err != nil {
-				t.Fatal(err)
-			}
-			var state string
-			var attempts int
-			var success sql.NullTime
-			if err := db.QueryRow(`SELECT state,attempts,last_success_at FROM catalog.refresh_jobs`).Scan(&state, &attempts, &success); err != nil {
-				t.Fatal(err)
-			}
-			if state != tc.want || success.Valid != (tc.providerErr == nil && !tc.missing) {
-				t.Fatalf("state=%s attempts=%d success=%v", state, attempts, success.Valid)
-			}
-			if tc.credentials && attempts != 0 {
-				t.Fatalf("auth consumed attempt: %d", attempts)
-			}
-		})
+		t.Run(tc.name, tc.run)
 	}
 }
-func TestRefreshRetriesAreBounded(t *testing.T) {
+
+func (tc refreshOutcomeCase) run(t *testing.T) {
+	t.Helper()
 	store, db := newTestStore(t)
 	upsertOne(t, store, zelda)
 	dueRefresh(t, db)
+	source := &fakeSource{games: []SourceGame{zelda}, err: tc.providerErr}
+	if tc.missing {
+		source.games = nil
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
 	p := DefaultRefreshPolicy()
-	for n := 1; n <= p.MaxAttempts; n++ {
-		j, err := store.claimRefresh(t.Context(), p)
-		if err != nil {
+	p.Poll = time.Millisecond
+	err := store.RunRefresh(ctx, NewImporter(source, store), p, func(error) bool { return tc.permanent }, func(error) bool { return tc.credentials }, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	var attempts int
+	var success sql.NullTime
+	if err := db.QueryRow(`SELECT state,attempts,last_success_at FROM catalog.refresh_jobs`).Scan(&state, &attempts, &success); err != nil {
+		t.Fatal(err)
+	}
+	if state != tc.want || success.Valid != (tc.providerErr == nil && !tc.missing) {
+		t.Fatalf("state=%s attempts=%d success=%v", state, attempts, success.Valid)
+	}
+	if tc.credentials && attempts != 0 {
+		t.Fatalf("auth consumed attempt: %d", attempts)
+	}
+	if tc.want == "failed" {
+		dueRefresh(t, db)
+		if _, err := store.claimRefresh(t.Context(), p); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("permanent failure reclaimed: %v", err)
+		}
+	}
+}
+func TestTransientRefreshFailuresStartANewRoundAfterRecovery(t *testing.T) {
+	store, db := newTestStore(t)
+	upsertOne(t, store, zelda)
+	p := DefaultRefreshPolicy()
+	source := &fakeSource{games: []SourceGame{zelda}, err: errors.New("offline")}
+	importer := NewImporter(source, store)
+	logger := slog.New(slog.DiscardHandler)
+	for attempt := 1; attempt <= p.MaxAttempts; attempt++ {
+		dueRefresh(t, db)
+		store.runNextRefresh(t.Context(), importer, p, nil, nil, logger)
+		var actual int
+		var delay float64
+		if err := db.QueryRow(`SELECT attempts,extract(epoch FROM next_run_at-now()) FROM catalog.refresh_jobs WHERE state='pending' AND last_error_code='provider_unavailable'`).Scan(&actual, &delay); err != nil {
 			t.Fatal(err)
 		}
-		if j.Attempts != n {
-			t.Fatalf("attempt %d", j.Attempts)
+		if actual != attempt {
+			t.Fatalf("attempt=%d, want %d", actual, attempt)
 		}
-		if err := store.finishRefresh(t.Context(), j, nil, 0, "provider_unavailable", n == p.MaxAttempts); err != nil {
-			t.Fatal(err)
+		if attempt == p.MaxAttempts && delay < p.Recovery.Seconds()-1 {
+			t.Fatalf("exhausted retry round waits %fs, want at least %v", delay, p.Recovery)
 		}
 	}
 	if _, err := store.claimRefresh(t.Context(), p); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("failed job reclaimed: %v", err)
+		t.Fatalf("refresh reclaimed before recovery: %v", err)
 	}
+	// The next round must call the provider again and commit its recovered data.
+	dueRefresh(t, db)
+	source.err = nil
+	source.games[0].Title = "Recovered title"
+	store.runNextRefresh(t.Context(), importer, p, nil, nil, logger)
+	assertCount(t, db, 1, `SELECT count(*) FROM catalog.refresh_jobs WHERE state='pending' AND attempts=0 AND last_error_code IS NULL AND last_success_at IS NOT NULL`)
+	assertCount(t, db, 1, `SELECT count(*) FROM catalog.games WHERE title='Recovered title'`)
 }
+
 func TestSearchCleanupRetainsGamesAndRecentQueries(t *testing.T) {
 	store, db := newTestStore(t)
 	game := upsertOne(t, store, zelda)

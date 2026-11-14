@@ -1,6 +1,7 @@
 package dev.unplayd.userapi
 
 import dev.unplayd.userapi.database.DatabaseConfig
+import dev.unplayd.userapi.database.dataSource
 import dev.unplayd.userapi.database.migrateDatabase
 import org.testcontainers.postgresql.PostgreSQLContainer
 import org.testcontainers.utility.MountableFile
@@ -13,11 +14,16 @@ internal class UserApiTestDatabase private constructor(
     private val catalogPassword: String,
     val config: DatabaseConfig,
 ) : AutoCloseable {
+    val dataSource = config.dataSource()
+
     fun connection(): Connection = DriverManager.getConnection(config.url, config.user, config.password)
 
     fun catalogConnection(): Connection = DriverManager.getConnection(postgres.jdbcUrl, "catalog", catalogPassword)
 
-    override fun close() = postgres.close()
+    override fun close() {
+        dataSource.close()
+        postgres.close()
+    }
 
     companion object {
         fun start(target: String? = null): UserApiTestDatabase {

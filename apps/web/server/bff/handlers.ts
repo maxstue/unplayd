@@ -1,5 +1,11 @@
 import { setResponseStatus, type H3Event } from "h3";
-import { withServices, upstream, publicError } from "../clients/request";
+import {
+  withServices,
+  withCatalogService,
+  withUserService,
+  upstream,
+  publicError,
+} from "../clients/request";
 import type { ServicesConfig } from "../clients/config";
 import type { components as Catalog } from "../clients/generated/catalog-api";
 import { enrichEntries } from "./library";
@@ -14,7 +20,7 @@ import {
 } from "./validation";
 
 export function searchGames(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
-  return withServices(
+  return withCatalogService(
     event,
     config,
     async (s) => {
@@ -32,7 +38,7 @@ export function searchGames(event: H3Event, config: ServicesConfig, fetcher?: ty
   );
 }
 export function getGame(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
-  return withServices(
+  return withCatalogService(
     event,
     config,
     async (s) => {
@@ -50,7 +56,7 @@ export function getGame(event: H3Event, config: ServicesConfig, fetcher?: typeof
   );
 }
 export function suggestGames(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
-  return withServices(
+  return withCatalogService(
     event,
     config,
     async (s) => {
@@ -68,7 +74,7 @@ export function suggestGames(event: H3Event, config: ServicesConfig, fetcher?: t
   );
 }
 export function batchGames(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
-  return withServices(
+  return withCatalogService(
     event,
     config,
     async (s) => {
@@ -161,7 +167,7 @@ export function listLibraryPlatforms(
             )
           ).data;
         } catch {
-          s.signal.throwIfAborted();
+          s.clientSignal.throwIfAborted();
           break;
         }
         if (!Array.isArray(batch.items)) {
@@ -184,7 +190,7 @@ export function listLibraryPlatforms(
   );
 }
 export function getLibraryOverview(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
-  return withServices(
+  return withUserService(
     event,
     config,
     async (s) => {
@@ -198,7 +204,7 @@ export function getLibraryOverview(event: H3Event, config: ServicesConfig, fetch
   );
 }
 export function addLibraryEntry(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
-  return withServices(
+  return withUserService(
     event,
     config,
     async (s) => {
@@ -213,7 +219,7 @@ export function addLibraryEntry(event: H3Event, config: ServicesConfig, fetcher?
   );
 }
 export function setLibraryStatus(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
-  return withServices(
+  return withUserService(
     event,
     config,
     async (s) => {
@@ -236,7 +242,7 @@ export function setLibraryStatus(event: H3Event, config: ServicesConfig, fetcher
   );
 }
 export function deleteLibraryEntry(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
-  return withServices(
+  return withUserService(
     event,
     config,
     async (s) => {

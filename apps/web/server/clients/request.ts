@@ -11,6 +11,7 @@ export function publicError(status: number, requestId: string) {
     403: ["forbidden", "Forbidden"],
     404: ["not_found", "Not found"],
     409: ["conflict", "Conflict"],
+    413: ["payload_too_large", "Payload too large"],
     503: ["unavailable", "Service unavailable"],
   };
   const [code, message] = errors[status] ?? errors[503]!;
@@ -92,15 +93,32 @@ interface UserRequestServices {
   user: ReturnType<typeof createUserClient>;
   requestId: string;
   signal: AbortSignal;
+  clientSignal: AbortSignal;
 }
 
 export interface RequestServices extends UserRequestServices {
   catalog: ReturnType<typeof createCatalogClient>;
 }
 
+// Bound SDK operations that do not accept an AbortSignal themselves.
+async function abortable<T>(task: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  let abort: () => void = () => {};
+  const aborted = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try {
+    return await Promise.race([task, aborted]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
+
 export async function withRequestSignal<T>(
   event: H3Event,
-  run: (signal: AbortSignal) => Promise<T>,
+  run: (signal: AbortSignal, clientSignal: AbortSignal) => Promise<T>,
+  timeoutMs = 5_000,
 ) {
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -111,13 +129,15 @@ export async function withRequestSignal<T>(
   };
   event.node.req.once("aborted", abort);
   event.node.res.once("close", close);
-  const signal = AbortSignal.any([
+  const clientSignal = AbortSignal.any([
     controller.signal,
     ...(event.web?.request?.signal ? [event.web.request.signal] : []),
   ]);
+  const signal = AbortSignal.any([clientSignal, AbortSignal.timeout(timeoutMs)]);
+  event.context.requestSignal = signal;
   try {
     signal.throwIfAborted();
-    return await run(signal);
+    return await run(signal, clientSignal);
   } catch (error) {
     if (error instanceof InvalidInput) {
       throw publicError(400, event.context.requestId);
@@ -134,42 +154,82 @@ export async function withRequestSignal<T>(
 
 export async function withUserService<T>(
   event: H3Event,
-  input: { appOrigin: string; userApiUrl: string; serviceTimeoutMs?: number | string },
+  input: {
+    appOrigin: string;
+    userApiUrl: string;
+    serviceTimeoutMs?: number | string;
+    requestTimeoutMs?: number | string;
+  },
   run: (services: UserRequestServices) => Promise<T>,
   fetcher?: typeof fetch,
 ) {
   const auth = requireSession(event, input.appOrigin);
-  return withRequestSignal(event, async (signal) => {
-    let token;
-    try {
-      token = await auth.getToken();
-    } catch {
-      throw publicError(503, event.context.requestId);
-    }
-    if (!token) {
-      throw publicError(401, event.context.requestId);
-    }
-    signal.throwIfAborted();
-    let user;
-    try {
-      user = createUserClient({
+  return withRequestSignal(
+    event,
+    async (signal, clientSignal) => {
+      let token: string | null;
+      try {
+        token = await abortable<string | null>(auth.getToken(), signal);
+      } catch {
+        throw publicError(503, event.context.requestId);
+      }
+      if (!token) {
+        throw publicError(401, event.context.requestId);
+      }
+      signal.throwIfAborted();
+      let user;
+      try {
+        user = createUserClient({
+          requestId: event.context.requestId,
+          timeoutMs:
+            input.serviceTimeoutMs === undefined ? undefined : Number(input.serviceTimeoutMs),
+          signal,
+          fetch: fetcher,
+          baseUrl: input.userApiUrl,
+          token,
+        });
+      } catch {
+        throw publicError(503, event.context.requestId);
+      }
+      return run({
+        user,
         requestId: event.context.requestId,
-        timeoutMs:
-          input.serviceTimeoutMs === undefined ? undefined : Number(input.serviceTimeoutMs),
         signal,
-        fetch: fetcher,
-        baseUrl: input.userApiUrl,
-        token,
+        clientSignal,
       });
-    } catch {
-      throw publicError(503, event.context.requestId);
-    }
-    return run({
-      user,
-      requestId: event.context.requestId,
-      signal,
-    });
-  });
+    },
+    Number(input.requestTimeoutMs ?? 5_000),
+  );
+}
+
+export function withCatalogService<T>(
+  event: H3Event,
+  input: ServicesConfig,
+  run: (
+    services: Pick<RequestServices, "catalog" | "requestId" | "signal" | "clientSignal">,
+  ) => Promise<T>,
+  fetcher?: typeof fetch,
+) {
+  requireSession(event, input.appOrigin);
+  const config = validateServicesConfig(input);
+  return withRequestSignal(
+    event,
+    (signal, clientSignal) =>
+      run({
+        catalog: createCatalogClient({
+          requestId: event.context.requestId,
+          timeoutMs: config.serviceTimeoutMs,
+          signal,
+          fetch: fetcher,
+          baseUrl: config.catalogApiUrl,
+          token: config.catalogServiceToken,
+        }),
+        requestId: event.context.requestId,
+        signal,
+        clientSignal,
+      }),
+    config.requestTimeoutMs,
+  );
 }
 
 export async function withServices<T>(

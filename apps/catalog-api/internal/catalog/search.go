@@ -124,6 +124,9 @@ type cursor struct {
 	Rank        int    `json:"r"`
 	ID          string `json:"i"`
 	Fingerprint string `json:"f"`
+	Title       string `json:"t,omitempty"`
+	// Very long titles use a bounded version token and expire on modification.
+	UpdatedAt *time.Time `json:"u,omitempty"`
 }
 
 func (c cursor) encode() string {
@@ -145,7 +148,7 @@ func decodeCursor(value, fingerprint string) (*cursor, error) {
 	if err := decoder.Decode(&position); err != nil || decoder.More() {
 		return nil, errInvalidCursor
 	}
-	if position.Fingerprint != fingerprint || position.Rank < rankExact || position.Rank > rankProvider || !uuidPattern.MatchString(position.ID) {
+	if position.Fingerprint != fingerprint || position.Rank < rankExact || position.Rank > rankProvider || !uuidPattern.MatchString(position.ID) || (position.Title == "" && position.UpdatedAt == nil) {
 		return nil, errInvalidCursor
 	}
 	return &position, nil
@@ -212,22 +215,24 @@ const searchSQL = `WITH candidates AS (
 				WHERE gp.game_id = g.id AND gp.platform_id = $5::uuid))
 			AND (NOT $8::boolean OR ($6::boolean AND g.parent_id IS NULL) OR g.kind = ANY($7::text[]))
 	), hits AS (
-		SELECT m.hit_id, min(m.rank) AS rank, lower(h.title) AS sort_title,
+		SELECT m.hit_id, min(m.rank) AS rank, lower(h.title) AS sort_title, h.updated_at,
 			coalesce(array_agg(m.id ORDER BY m.rank, m.sort_title, m.id) FILTER (WHERE m.id <> m.hit_id), '{}') AS children
 		FROM matches m JOIN catalog.games h ON h.id = m.hit_id AND h.is_active
-		GROUP BY m.hit_id, h.title
+		GROUP BY m.hit_id, h.title, h.updated_at
 	)
-	SELECT hit_id, rank, children FROM hits
+	SELECT hit_id, rank, children, sort_title, updated_at FROM hits
 	WHERE $9::uuid IS NULL
-		OR (rank, sort_title, hit_id) > ($10::int, (SELECT lower(title) FROM catalog.games WHERE id = $9::uuid), $9::uuid)
+		OR (rank, sort_title, hit_id) > ($10::int, $13::text, $9::uuid)
 	ORDER BY rank, sort_title, hit_id
 	LIMIT $11`
 
 func (q localQuery) searchArgs() []any {
 	var afterID sql.NullString
 	afterRank := 0
+	afterTitle := ""
 	if q.after != nil {
 		afterID, afterRank = sql.NullString{String: q.after.ID, Valid: true}, q.after.Rank
+		afterTitle = q.after.Title
 	}
 	patterns := q.patterns()
 	longest := slices.MaxFunc(patterns, func(a, b string) int { return len(a) - len(b) })
@@ -235,7 +240,7 @@ func (q localQuery) searchArgs() []any {
 		q.key, pq.Array(patterns), q.text, escapeLike(q.text) + "%",
 		sql.NullString{String: q.platformID, Valid: q.platformID != ""},
 		q.filter.Parents, pq.Array(q.filter.Kinds), !q.filter.empty(),
-		afterID, afterRank, q.limit + 1, longest,
+		afterID, afterRank, q.limit + 1, longest, afterTitle,
 	}
 }
 
@@ -250,19 +255,31 @@ func (s *Store) search(ctx context.Context, q localQuery) ([]SearchHit, *cursor,
 		return nil, nil, err
 	}
 	defer tx.Rollback()
+	if q.after != nil && q.after.Title == "" {
+		var updated time.Time
+		err := tx.QueryRowContext(ctx, `SELECT lower(title), updated_at FROM catalog.games WHERE id=$1`, q.after.ID).Scan(&q.after.Title, &updated)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && !updated.Equal(*q.after.UpdatedAt)) {
+			return nil, nil, errInvalidCursor
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	rows, err := tx.QueryContext(ctx, searchSQL, q.searchArgs()...)
 	if err != nil {
 		return nil, nil, err
 	}
 	type row struct {
-		id       string
-		rank     int
-		children []string
+		id        string
+		rank      int
+		children  []string
+		title     string
+		updatedAt time.Time
 	}
 	var found []row
 	for rows.Next() {
 		var hit row
-		if err := rows.Scan(&hit.id, &hit.rank, pq.Array(&hit.children)); err != nil {
+		if err := rows.Scan(&hit.id, &hit.rank, pq.Array(&hit.children), &hit.title, &hit.updatedAt); err != nil {
 			rows.Close()
 			return nil, nil, err
 		}
@@ -276,7 +293,11 @@ func (s *Store) search(ctx context.Context, q localQuery) ([]SearchHit, *cursor,
 	if len(found) > q.limit {
 		found = found[:q.limit]
 		last := found[len(found)-1]
-		next = &cursor{Rank: last.rank, ID: last.id, Fingerprint: q.fingerprint()}
+		next = &cursor{Rank: last.rank, ID: last.id, Fingerprint: q.fingerprint(), Title: last.title}
+		if len(next.encode()) > maxCursorLength {
+			next.Title = ""
+			next.UpdatedAt = &last.updatedAt
+		}
 	}
 	var ids, parentIDs []string
 	for _, hit := range found {

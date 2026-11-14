@@ -185,6 +185,40 @@ func newRankFixture(t *testing.T) rankFixture {
 	return fixture
 }
 
+func TestSearchCursorKeepsItsBoundaryWhenTheLastTitleChanges(t *testing.T) {
+	store, _ := newTestStore(t)
+	service := newTestService(store, nil, testPolicy)
+	for index, title := range []string{"Halo A", "Halo B", "Halo C"} {
+		upsertOne(t, store, SourceGame{Source: "igdb", ExternalID: fmt.Sprint(index + 1), Title: title, Kind: KindGame})
+	}
+	page := searchPage(t, service, SearchRequest{Query: "halo", Limit: 2})
+	assertTitles(t, hitTitles(page.Hits), "Halo A", "Halo B")
+	upsertOne(t, store, SourceGame{Source: "igdb", ExternalID: "2", Title: "Halo Z", Kind: KindGame})
+	next := searchPage(t, service, SearchRequest{Query: "halo", Limit: 2, Cursor: page.NextCursor})
+	assertTitles(t, hitTitles(next.Hits), "Halo C", "Halo Z")
+}
+
+func TestLongTitleCursorsStayBoundedAndExpireOnChanges(t *testing.T) {
+	store, _ := newTestStore(t)
+	service := newTestService(store, nil, testPolicy)
+	game := SourceGame{Source: "igdb", ExternalID: "1", Title: "Halo A" + strings.Repeat("界", 300), Kind: KindGame}
+	upsertOne(t, store, game)
+	upsertOne(t, store, SourceGame{Source: "igdb", ExternalID: "2", Title: "Halo B" + strings.Repeat("龍", 300), Kind: KindGame})
+	page := searchPage(t, service, SearchRequest{Query: "halo", Limit: 1})
+	if page.NextCursor == "" || len(page.NextCursor) > maxCursorLength {
+		t.Fatal("long titles must still produce a bounded cursor")
+	}
+	request := SearchRequest{Query: "halo", Limit: 1, Cursor: page.NextCursor}
+	if len(searchPage(t, service, request).Hits) != 1 {
+		t.Fatal("unchanged long-title cursor did not continue")
+	}
+	game.Title = "Halo Z"
+	upsertOne(t, store, game)
+	if _, err := service.Search(t.Context(), request); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("changed long-title cursor must expire, got %v", err)
+	}
+}
+
 func (f rankFixture) titles(t *testing.T, request SearchRequest) []string {
 	t.Helper()
 	return hitTitles(searchPage(t, f.service, request).Hits)
@@ -426,11 +460,23 @@ func TestDefaultSearchPolicyFitsTheServiceClientBudget(t *testing.T) {
 // searches through the trigram index. Small catalogs are cheaper to scan.
 func TestTitleSearchUsesTheTrigramIndex(t *testing.T) {
 	_, db := newTestStore(t)
-	if _, err := db.ExecContext(t.Context(), `INSERT INTO catalog.games(title, kind)
+	seed, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer seed.Rollback()
+	// Bulk fixture creation has its own budget; measured queries keep app defaults.
+	if _, err := seed.ExecContext(t.Context(), `SET LOCAL statement_timeout = '30s'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.ExecContext(t.Context(), `INSERT INTO catalog.games(title, kind)
 		SELECT 'Generated game ' || md5(n::text), 'game' FROM generate_series(1, 200000) AS n`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(t.Context(), `ANALYZE catalog.games`); err != nil {
+	if _, err := seed.ExecContext(t.Context(), `ANALYZE catalog.games`); err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Commit(); err != nil {
 		t.Fatal(err)
 	}
 	query, err := newLocalQuery(SearchRequest{Query: "the zelda", Limit: 20})

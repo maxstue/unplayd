@@ -1,5 +1,7 @@
-import { getHeader, getQuery, getRouterParam, readBody, type H3Event } from "h3";
-import { InvalidInput } from "../clients/request";
+import { addAbortSignal, Readable } from "node:stream";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
+import { getHeader, getQuery, getRouterParam, type H3Event } from "h3";
+import { InvalidInput, publicError } from "../clients/request";
 
 const uuidPattern = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const ownerships = ["owned", "wishlist", "subscription"] as const;
@@ -79,9 +81,37 @@ async function body(event: H3Event, fields: string[]) {
   if (getHeader(event, "content-type")?.split(";")[0] !== "application/json") {
     return invalid();
   }
+  const maxBytes = 16 * 1024;
+  if (Number(getHeader(event, "content-length")) > maxBytes) {
+    throw publicError(413, event.context.requestId);
+  }
+  const webBody = event.web?.request?.body;
+  const stream = webBody
+    ? Readable.fromWeb(webBody as NodeReadableStream<Uint8Array>)
+    : event.node.req;
+  const signal = event.context.requestSignal as AbortSignal | undefined;
+  if (signal) {
+    addAbortSignal(signal, stream);
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    // Keep the HTTP connection writable long enough to return a 413.
+    for await (const chunk of stream.iterator({
+      destroyOnReturn: false,
+    }) as AsyncIterable<Uint8Array>) {
+      size += chunk.byteLength;
+      if (size > maxBytes) {
+        throw publicError(413, event.context.requestId);
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    stream.resume();
+  }
   let data: unknown;
   try {
-    data = await readBody(event);
+    data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
     return invalid();
   }

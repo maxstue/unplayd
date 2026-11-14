@@ -24,6 +24,7 @@ export default defineNuxtConfig({
     catalogApiUrl: "http://localhost:8446",
     catalogServiceToken: "",
     serviceTimeoutMs: 3_000,
+    requestTimeoutMs: 5_000,
   },
   routeRules: {
     "/favicon.svg": { headers: { "Cache-Control": "public, max-age=86400" } },

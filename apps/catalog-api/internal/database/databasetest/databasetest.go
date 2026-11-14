@@ -24,7 +24,9 @@ func Open(t testing.TB) *sql.DB {
 		t.Fatal("locate the shared PostgreSQL bootstrap")
 	}
 	catalogPassword := rand.Text()
-	container, err := postgres.Run(t.Context(), "postgres:18.3-bookworm",
+	// renovate: datasource=docker depName=postgres
+	const image = "postgres:18.6-bookworm"
+	container, err := postgres.Run(t.Context(), image,
 		postgres.WithDatabase("unplayd"),
 		postgres.WithUsername("postgres"),
 		postgres.WithPassword(rand.Text()),

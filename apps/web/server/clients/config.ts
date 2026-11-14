@@ -4,6 +4,7 @@ export interface ServicesConfig {
   catalogApiUrl: string;
   catalogServiceToken: string;
   serviceTimeoutMs: number | string;
+  requestTimeoutMs?: number | string;
 }
 
 export function validateServicesConfig(config: ServicesConfig) {
@@ -44,5 +45,9 @@ export function validateServicesConfig(config: ServicesConfig) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) {
     throw new Error("NUXT_SERVICE_TIMEOUT_MS must be an integer between 1 and 30000.");
   }
-  return { ...config, serviceTimeoutMs: timeoutMs };
+  const requestTimeoutMs = Number(config.requestTimeoutMs ?? 5_000);
+  if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1 || requestTimeoutMs > 30_000) {
+    throw new Error("NUXT_REQUEST_TIMEOUT_MS must be an integer between 1 and 30000.");
+  }
+  return { ...config, serviceTimeoutMs: timeoutMs, requestTimeoutMs };
 }

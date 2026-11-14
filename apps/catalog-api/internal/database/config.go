@@ -46,6 +46,21 @@ func (c Config) connectionString() string {
 	endpoint.User = url.UserPassword(c.user, c.password)
 	query := endpoint.Query()
 	query.Set("search_path", "catalog")
+	// Defaults apply to application pools. Migration sessions opt out below.
+	for name, value := range map[string]string{"connect_timeout": "3", "statement_timeout": "2000", "lock_timeout": "1000"} {
+		if query.Get(name) == "" {
+			query.Set(name, value)
+		}
+	}
 	endpoint.RawQuery = query.Encode()
 	return endpoint.String()
+}
+
+// migrationConfig retains connection bounds while allowing long DDL statements.
+func (c Config) migrationConfig() Config {
+	query := c.endpoint.Query()
+	query.Set("statement_timeout", "0")
+	query.Set("lock_timeout", "10000")
+	c.endpoint.RawQuery = query.Encode()
+	return c
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
@@ -35,6 +36,8 @@ func Open(ctx context.Context, config Config) (*sql.DB, error) {
 }
 
 func open(ctx context.Context, config Config) (*sql.DB, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	db, err := sql.Open("postgres", config.connectionString())
 	if err != nil {
 		return nil, err
@@ -56,7 +59,7 @@ func redact(err error, config Config) error {
 }
 
 func migrateDatabase(ctx context.Context, config Config, target *uint) error {
-	db, err := open(ctx, config)
+	db, err := open(ctx, config.migrationConfig())
 	if err != nil {
 		return err
 	}

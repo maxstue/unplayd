@@ -22,6 +22,40 @@ type postgresFixture struct {
 	foreignConfig Config
 }
 
+func TestDatabaseStatementAndLockWaitsAreBounded(t *testing.T) {
+	fixture := newPostgresFixture(t)
+	config := fixture.config
+	query := config.endpoint.Query()
+	query.Set("statement_timeout", "50")
+	query.Set("lock_timeout", "25")
+	config.endpoint.RawQuery = query.Encode()
+	db, err := Open(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	assertState := func(err error, state string) {
+		t.Helper()
+		var failure *pq.Error
+		if !errors.As(err, &failure) || string(failure.Code) != state {
+			t.Fatalf("error=%v, want SQLSTATE %s", err, state)
+		}
+	}
+	_, err = db.ExecContext(t.Context(), "SELECT pg_sleep(1)")
+	assertState(err, "57014")
+	executeSQL(t, fixture.db, "CREATE TABLE catalog.timeout_probe(id integer)")
+	lock, err := fixture.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback()
+	if _, err := lock.ExecContext(t.Context(), "LOCK TABLE catalog.timeout_probe IN ACCESS EXCLUSIVE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.ExecContext(t.Context(), "SELECT * FROM catalog.timeout_probe")
+	assertState(err, "55P03")
+}
+
 func newPostgresFixture(t *testing.T) postgresFixture {
 	t.Helper()
 	_, filename, _, ok := runtime.Caller(0)
@@ -29,7 +63,9 @@ func newPostgresFixture(t *testing.T) postgresFixture {
 		t.Fatal("locate the shared PostgreSQL bootstrap")
 	}
 	catalogPassword, userPassword := rand.Text(), rand.Text()
-	container, err := postgres.Run(t.Context(), "postgres:18.3-bookworm",
+	// renovate: datasource=docker depName=postgres
+	const image = "postgres:18.6-bookworm"
+	container, err := postgres.Run(t.Context(), image,
 		postgres.WithDatabase("unplayd"),
 		postgres.WithUsername("postgres"),
 		postgres.WithPassword(rand.Text()),

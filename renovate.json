@@ -23,6 +23,16 @@
     "labels": ["dependencies", "security"],
     "automerge": false
   },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/\\.go$/", "/\\.kt$/"],
+      "matchStrings": [
+        "renovate: datasource=docker depName=(?<depName>[^\\s]+)\\s+(?:const|val) image = \"[^\"]+:(?<currentValue>[^\"]+)\""
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
   "packageRules": [
     {
       "matchManagers": ["npm"],
@@ -31,7 +41,7 @@
     },
     { "matchManagers": ["github-actions"], "groupName": "github actions" },
     {
-      "matchManagers": ["dockerfile", "docker-compose"],
+      "matchDatasources": ["docker"],
       "groupName": "docker images"
     },
     {

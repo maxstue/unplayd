@@ -200,14 +200,18 @@ func (c *Client) games(ctx context.Context, query string) ([]catalog.SourceGame,
 		return nil, err
 	}
 	var found []igdbGame
-	if err := json.Unmarshal(body, &found); err != nil {
-		return nil, fmt.Errorf("%w: malformed games response", ErrRejected)
+	if err := json.Unmarshal(body, &found); err != nil || found == nil {
+		return nil, fmt.Errorf("%w: malformed games response", ErrUnavailable)
 	}
 	games := make([]catalog.SourceGame, 0, len(found))
 	for _, game := range found {
-		if mapped, ok := mapGame(game); ok {
+		mapped, ok := mapGame(game)
+		if ok {
 			games = append(games, mapped)
 		}
+	}
+	if len(found) > 0 && len(games) == 0 {
+		return nil, fmt.Errorf("%w: invalid games in provider response", ErrUnavailable)
 	}
 	return games, nil
 }
@@ -351,7 +355,7 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 	}
 	var token tokenResponse
 	if err := json.Unmarshal(body, &token); err != nil || !validCredential(token.AccessToken) || token.ExpiresIn <= 0 {
-		return "", fmt.Errorf("%w: malformed token response", ErrRejected)
+		return "", fmt.Errorf("%w: malformed token response", ErrUnavailable)
 	}
 	lifetime := time.Duration(token.ExpiresIn) * time.Second
 	if lifetime > 2*tokenRenewalMargin {
@@ -387,7 +391,7 @@ func (c *Client) do(request *http.Request) (int, []byte, http.Header, error) {
 		return 0, nil, nil, errors.New("reading response failed")
 	}
 	if len(body) > maxResponseBytes {
-		return 0, nil, nil, fmt.Errorf("%w: response exceeds %d bytes", ErrRejected, maxResponseBytes)
+		return 0, nil, nil, fmt.Errorf("%w: response exceeds %d bytes", ErrUnavailable, maxResponseBytes)
 	}
 	return response.StatusCode, body, response.Header, nil
 }

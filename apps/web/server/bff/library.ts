@@ -43,7 +43,8 @@ export async function enrichEntries(entries: Entry[], services: RequestServices)
       batch = undefined;
     }
   } catch {
-    services.signal.throwIfAborted();
+    // A spent aggregation budget still permits the already loaded snapshots.
+    services.clientSignal.throwIfAborted();
   }
   const games = new Map(batch?.items.map((game) => [game.id, game]));
   return {

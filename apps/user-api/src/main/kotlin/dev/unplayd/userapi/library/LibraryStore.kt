@@ -208,7 +208,8 @@ class JdbcLibraryStore(
                     it.executeUpdate()
                 }
             }
-            requireNotNull(db.findLocked(userId, gameId))
+            // The parent remains locked until commit; only refresh the projection.
+            requireNotNull(db.findEntry(userId, gameId))
         }
 
     override suspend fun delete(
@@ -236,12 +237,18 @@ class JdbcLibraryStore(
                 it.executeQuery().use { rows -> rows.next() }
             }
         if (!exists) return null
-        return prepareStatement("$ENTRY_SELECT WHERE e.user_id=? AND e.game_id=?").use {
+        return findEntry(userId, gameId)
+    }
+
+    private fun Connection.findEntry(
+        userId: UUID,
+        gameId: UUID,
+    ): LibraryEntry? =
+        prepareStatement("$ENTRY_SELECT WHERE e.user_id=? AND e.game_id=?").use {
             it.setObject(1, userId)
             it.setObject(2, gameId)
             it.executeQuery().use { rows -> if (rows.next()) rows.entry() else null }
         }
-    }
 
     private suspend fun <T> read(block: (Connection) -> T): T =
         withContext(Dispatchers.IO) {

@@ -1,7 +1,7 @@
 package dev.unplayd.userapi.catalog
 
 import dev.unplayd.userapi.library.LibraryProblem
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.future.await
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.net.URI
@@ -10,8 +10,6 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.UUID
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 class CatalogConfig private constructor(
     val baseUrl: URI,
@@ -94,13 +92,7 @@ class HttpCatalogClient(
                 .build()
         val response =
             try {
-                suspendCancellableCoroutine<HttpResponse<String>> { continuation ->
-                    val future = client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                    continuation.invokeOnCancellation { future.cancel(true) }
-                    future.whenComplete { result, error ->
-                        if (error == null) continuation.resume(result) else continuation.resumeWithException(error)
-                    }
-                }
+                client.sendAsync(request, HttpResponse.BodyHandlers.ofString()).await()
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: Exception) {

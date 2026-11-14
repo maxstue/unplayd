@@ -25,6 +25,11 @@ const saving = ref(false);
 const saveError = ref("");
 const added = ref(false);
 const missingEntry = computed(() => entryError.value?.statusCode === 404);
+const favoriteSaving = ref(false);
+const favoriteError = ref("");
+const canFavorite = computed(
+  () => !!entry.value || (missingEntry.value && !!detail.value?.game.isActive),
+);
 watch(
   entry,
   (value) => {
@@ -35,6 +40,30 @@ watch(
   { immediate: true },
 );
 useHead({ title: () => `${detail.value?.game.title ?? "Spieldetails"} · Unplayd` });
+
+async function toggleFavorite() {
+  if (favoriteSaving.value || !canFavorite.value) {
+    return;
+  }
+  const favorite = !entry.value?.favorite;
+  favoriteSaving.value = true;
+  favoriteError.value = "";
+  try {
+    await $fetch(`/api/favorites/${id}`, { method: favorite ? "PUT" : "DELETE" });
+    knownEntries.value[id] = true;
+    if (entry.value) {
+      entry.value = { ...entry.value, favorite };
+    } else {
+      // Favoriting created the entry; load it with its catalog data.
+      added.value = true;
+      await refreshEntry();
+    }
+  } catch {
+    favoriteError.value = "Der Favorit konnte nicht gespeichert werden. Bitte versuche es erneut.";
+  } finally {
+    favoriteSaving.value = false;
+  }
+}
 
 async function addToLibrary() {
   if (
@@ -114,6 +143,19 @@ async function addToLibrary() {
           <p v-if="!detail.game.isActive" class="notice">
             Dieses Spiel ist im Katalog nicht mehr aktiv und kann nicht hinzugefügt werden.
           </p>
+          <div v-if="canFavorite && entryStatus !== 'pending'" class="favorite-action">
+            <FavoriteButton
+              :active="!!entry?.favorite"
+              :title="detail.game.title"
+              label="Favorit"
+              :disabled="favoriteSaving || saving"
+              @toggle="toggleFavorite()"
+            />
+            <p v-if="!entry && !added" class="muted">
+              Fügt das Spiel als Wunschliste im Backlog zu deiner Bibliothek hinzu.
+            </p>
+            <p v-if="favoriteError" role="alert" class="error-message">{{ favoriteError }}</p>
+          </div>
           <output v-if="entryStatus === 'pending'">Deine Bibliothek wird geprüft …</output>
           <div v-else-if="entry || added" class="notice">
             <h2>

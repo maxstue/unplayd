@@ -1,4 +1,6 @@
 // Browser view models. Service credentials and clients stay in server/.
+import type { LibraryState } from "./library";
+
 export interface GameCardModel {
   id: string;
   title: string;
@@ -10,6 +12,8 @@ export interface SearchHit {
   game: GameCardModel;
   childCounts: { kind: string; count: number }[];
   matchedChildren: GameCardModel[];
+  /** The user's state for this game; `null` when it could not be loaded. */
+  library: LibraryState | null;
 }
 
 export interface GameDetailView {

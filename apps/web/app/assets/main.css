@@ -293,17 +293,120 @@ select {
   gap: 1.75rem 1.5rem;
 }
 .game-card {
+  position: relative;
   min-width: 0;
+}
+.game-card > .favorite-toggle {
+  position: absolute;
+  z-index: 1;
+  top: 0.4rem;
+  left: 0.4rem;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  min-height: 34px;
+  margin: 0;
+  padding: 0.4rem;
+  color: var(--foreground);
+  background: #18181be6;
+  border: 1px solid #ffffff30;
+  border-radius: 0.35rem;
+}
+.game-card > .favorite-toggle.active,
+.favorite-action .favorite-toggle.active,
+.favorite-toggle:hover:not(:disabled) {
+  color: var(--accent);
+}
+.favorite-toggle {
+  transition:
+    color 300ms ease,
+    opacity 150ms ease;
+}
+.favorite-toggle svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  fill-opacity: 0;
+  transition: fill-opacity 350ms ease;
+}
+.favorite-toggle.active svg {
+  fill-opacity: 1;
+}
+/* Starts and ends at the resting size so the click never jumps; each turn eases in and out. */
+.favorite-toggle.popping svg {
+  animation: favorite-pop 650ms ease-in-out;
+}
+@keyframes favorite-pop {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.18);
+  }
+  75% {
+    transform: scale(0.97);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .favorite-toggle,
+  .favorite-toggle svg {
+    transition: none;
+  }
+  .favorite-toggle.popping svg {
+    animation: none;
+  }
+}
+/* Search cards reveal the toggle on hover or focus; touch devices always show it. */
+@media (hover: hover) {
+  /* :where() keeps the hiding rule weaker than the hover and focus rules below. */
+  :where(.game-card:not(.library-card)) > .favorite-toggle:not(.active) {
+    opacity: 0;
+  }
+  .game-card:hover > .favorite-toggle,
+  .game-card:focus-within > .favorite-toggle {
+    opacity: 1;
+  }
+}
+.favorite-action {
+  margin-block: 1rem;
+}
+.favorite-action .favorite-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--foreground);
+  background: var(--surface);
+  border-color: var(--line);
+}
+.favorite-action p {
+  margin-top: 0.4rem;
+  font-size: 0.8125rem;
+}
+.favorite-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 40px;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+.favorite-filter input {
+  width: 18px;
+  min-height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
 }
 .game-link {
   color: inherit;
   text-decoration: none;
   display: block;
 }
-.game-link:hover h3 {
+/* The whole card keeps its hover state, including while over its action buttons. */
+.game-card:hover .game-link h3 {
   color: var(--accent);
 }
-.game-link:hover .game-cover {
+.game-card:hover .game-link .game-cover {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

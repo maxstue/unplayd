@@ -21,6 +21,8 @@ import entry from "../server/api/library/[gameId].get";
 import add from "../server/api/library/index.post";
 import status from "../server/api/library/[gameId]/status.put";
 import remove from "../server/api/library/[gameId].delete";
+import favorite from "../server/api/favorites/[gameId].put";
+import unfavorite from "../server/api/favorites/[gameId].delete";
 import requestId from "../server/middleware/request-id";
 import { validateServicesConfig } from "../server/clients/config";
 import type { components } from "../server/clients/generated/user-api";
@@ -81,7 +83,9 @@ function app() {
     .post("/api/library", add)
     .get("/api/library/:gameId", entry)
     .put("/api/library/:gameId/status", status)
-    .delete("/api/library/:gameId", remove);
+    .delete("/api/library/:gameId", remove)
+    .put("/api/favorites/:gameId", favorite)
+    .delete("/api/favorites/:gameId", unfavorite);
   return createApp()
     .use(requestId)
     .use(
@@ -462,6 +466,7 @@ it.each([401, 403, 429, 500, 503, "invalid-json", "invalid-shape"])(
           platformId: first.platformId,
           ownership: first.ownership,
           status: first.status,
+          favorite: first.favorite,
           game: null,
           display: first.snapshot,
           catalogStatus: "unavailable",
@@ -584,6 +589,89 @@ it.each([
     expect(fetcher).not.toHaveBeenCalled();
   },
 );
+
+it("forwards favorites to Ktor and returns an empty 204 on removal", async () => {
+  fetcher
+    .mockResolvedValueOnce(Response.json({ ...first, favorite: true }))
+    .mockResolvedValueOnce(new Response(null, { status: 204 }));
+  const response = await send(`/api/favorites/${first.gameId}`, "PUT");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ favorite: true });
+  expect(requests()[0]!.url).toBe(`${config.userApiUrl}/favorites/${first.gameId}`);
+  expect(requests()[0]!.headers.get("Authorization")).toBe(`Bearer ${aliceToken}`);
+  const removed = await send(`/api/favorites/${first.gameId}`, "DELETE");
+  expect(removed.status).toBe(204);
+  expect(await removed.text()).toBe("");
+  expect(requests()[1]!.method).toBe("DELETE");
+  expect((await send("/api/favorites/invalid", "PUT")).status).toBe(400);
+  expect(
+    (
+      await send(`/api/favorites/${first.gameId}`, "PUT", undefined, {
+        Origin: "https://x.example",
+      })
+    ).status,
+  ).toBe(403);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it("forwards the favorite filter and rejects other values", async () => {
+  fetcher.mockResolvedValueOnce(Response.json({ items: [], nextCursor: null }));
+  expect((await send("/api/library?favorite=true")).status).toBe(200);
+  expect(requests()[0]!.url).toBe(`${config.userApiUrl}/library?favorite=true`);
+  for (const value of ["false", "1", ""]) {
+    expect((await send(`/api/library?favorite=${value}`)).status).toBe(400);
+  }
+  expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it("adds the user's library state to search hits with one lookup", async () => {
+  const hit = (gameId: string) => ({ game: game(gameId), childCounts: [], matchedChildren: [] });
+  const other = randomUUID();
+  fetcher
+    .mockResolvedValueOnce(
+      Response.json({ items: [hit(first.gameId), hit(other)], nextCursor: null }),
+    )
+    .mockResolvedValueOnce(
+      Response.json({ items: [{ ...first, status: "playing", favorite: true }] }),
+    );
+  const response = await send("/api/games?query=Zelda");
+  expect(response.status).toBe(200);
+  expect((await response.json()).items.map((item: { library: unknown }) => item.library)).toEqual([
+    { status: "playing", favorite: true },
+    { status: null, favorite: false },
+  ]);
+  expect(requests()[1]!.url).toBe(`${config.userApiUrl}/library/lookup`);
+  expect(requests()[1]!.headers.get("Authorization")).toBe(`Bearer ${aliceToken}`);
+  expect(await requests()[1]!.json()).toEqual({ gameIds: [first.gameId, other] });
+});
+
+it("returns search hits with unknown library state when the lookup fails or is slow", async () => {
+  const items = [{ game: game(first.gameId), childCounts: [], matchedChildren: [] }];
+  fetcher
+    .mockResolvedValueOnce(Response.json({ items, nextCursor: null }))
+    .mockResolvedValueOnce(new Response(null, { status: 503 }))
+    .mockResolvedValueOnce(Response.json({ items, nextCursor: null }))
+    .mockImplementationOnce(
+      (_request, init) =>
+        new Promise((_resolve, reject) => {
+          init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), {
+            once: true,
+          });
+        }),
+    );
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const started = Date.now();
+    const response = await send("/api/games?query=Zelda");
+    expect(response.status).toBe(200);
+    expect((await response.json()).items[0].library).toBeNull();
+    expect(Date.now() - started).toBeLessThan(1500);
+  }
+  fetcher.mockResolvedValueOnce(Response.json({ items, nextCursor: null }));
+  const headers = { "x-test-session": "token-hangs" };
+  const response = await send("/api/games?query=Zelda", "GET", undefined, headers);
+  expect((await response.json()).items[0].library).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(5);
+});
 
 it("rejects missing sessions and cross-origin writes before upstream requests", async () => {
   expect((await send("/api/library", "GET", undefined, { "X-Test-Session": "none" })).status).toBe(

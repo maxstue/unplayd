@@ -8,7 +8,7 @@ import {
 } from "../clients/request";
 import type { ServicesConfig } from "../clients/config";
 import type { components as Catalog } from "../clients/generated/catalog-api";
-import { enrichEntries } from "./library";
+import { enrichEntries, withLibraryState } from "./library";
 import {
   addEntryBody,
   batchBody,
@@ -20,12 +20,13 @@ import {
 } from "./validation";
 
 /**
- * Searches the catalog with the validated {@link catalogQuery}.
+ * Searches the catalog with the validated {@link catalogQuery} and adds the user's library state
+ * via {@link withLibraryState}.
  *
  * @param event - The incoming {@link H3Event}.
  * @param config - Runtime {@link ServicesConfig} for the upstream services.
  * @param fetcher - Optional `fetch` override, used in tests.
- * @returns The catalog search page.
+ * @returns The catalog search page with `library` state per hit.
  */
 export function searchGames(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
   return withCatalogService(
@@ -33,7 +34,7 @@ export function searchGames(event: H3Event, config: ServicesConfig, fetcher?: ty
     config,
     async (s) => {
       const query = catalogQuery(event);
-      return (
+      const page = (
         await upstream(
           () => s.catalog.GET("/games", { params: { query } }),
           "catalog",
@@ -41,6 +42,7 @@ export function searchGames(event: H3Event, config: ServicesConfig, fetcher?: ty
           { signal: s.signal },
         )
       ).data;
+      return withLibraryState(page, event, config, s, fetcher);
     },
     fetcher,
   );
@@ -341,6 +343,58 @@ export function deleteLibraryEntry(event: H3Event, config: ServicesConfig, fetch
           s.user.DELETE("/library/{gameId}", {
             params: { path: { gameId: id } },
           }),
+        "user",
+        s.requestId,
+        { allowEmpty: true, signal: s.signal },
+      );
+      setResponseStatus(event, 204);
+      return null;
+    },
+    fetcher,
+  );
+}
+/**
+ * Favorites a game; the user service adds it to the library as wishlist/backlog if absent.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The updated entry.
+ */
+export function setFavorite(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
+  return withUserService(
+    event,
+    config,
+    async (s) => {
+      const id = gameId(event);
+      return (
+        await upstream(
+          () => s.user.PUT("/favorites/{gameId}", { params: { path: { gameId: id } } }),
+          "user",
+          s.requestId,
+          { signal: s.signal },
+        )
+      ).data;
+    },
+    fetcher,
+  );
+}
+/**
+ * Removes a favorite without touching the library entry and responds with 204.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns `null`.
+ */
+export function removeFavorite(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
+  return withUserService(
+    event,
+    config,
+    async (s) => {
+      const id = gameId(event);
+      await upstream(
+        () => s.user.DELETE("/favorites/{gameId}", { params: { path: { gameId: id } } }),
         "user",
         s.requestId,
         { allowEmpty: true, signal: s.signal },

@@ -56,6 +56,22 @@ internal class TestUsers(
                 userId: UUID,
                 gameId: UUID,
             ) = error("Not used by identity tests")
+
+            override suspend fun lookup(
+                userId: UUID,
+                gameIds: List<UUID>,
+            ) = error("Not used by identity tests")
+
+            override suspend fun setFavorite(
+                userId: UUID,
+                gameId: UUID,
+                snapshot: GameSnapshot?,
+            ) = error("Not used by identity tests")
+
+            override suspend fun removeFavorite(
+                userId: UUID,
+                gameId: UUID,
+            ) = error("Not used by identity tests")
         }
 
     override suspend fun resolve(subject: String): LocalUser {

@@ -59,6 +59,22 @@ data class SetStatus(
 )
 
 @Serializable
+data class LibraryLookupRequest(
+    val gameIds: List<String>,
+) {
+    fun ids(): List<UUID> {
+        val ids = gameIds.map(::uuid)
+        if (ids.size !in 1..50 || ids.toSet().size != ids.size) throw LibraryProblem(400, "Invalid game IDs")
+        return ids
+    }
+}
+
+@Serializable
+data class LibraryLookup(
+    val items: List<LibraryEntry>,
+)
+
+@Serializable
 data class LibraryPage(
     val items: List<LibraryEntry>,
     val nextCursor: String?,
@@ -71,6 +87,7 @@ internal data class LibraryCursor(
     val status: String?,
     val ownership: String?,
     val platformId: String?,
+    val favorite: Boolean = false,
 ) {
     fun encode(): String = Base64.getUrlEncoder().withoutPadding().encodeToString(Json.encodeToString(this).toByteArray())
 }
@@ -79,6 +96,7 @@ class LibraryFilter(
     val status: String? = null,
     val ownership: String? = null,
     platformId: String? = null,
+    val favorite: Boolean = false,
     val limit: Int = 20,
     cursor: String? = null,
 ) {
@@ -96,7 +114,12 @@ class LibraryFilter(
                     Json.decodeFromString<LibraryCursor>(Base64.getUrlDecoder().decode(it).decodeToString()).also { value ->
                         Instant.parse(value.createdAt)
                         uuid(value.id)
-                        require(value.status == status && value.ownership == ownership && value.platformId == this.platformId)
+                        require(
+                            value.status == status &&
+                                value.ownership == ownership &&
+                                value.platformId == this.platformId &&
+                                value.favorite == favorite,
+                        )
                     }
                 } catch (_: Exception) {
                     throw LibraryProblem(400, "Invalid library cursor")

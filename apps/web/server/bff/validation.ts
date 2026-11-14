@@ -30,6 +30,9 @@ function choice<T extends string>(value: unknown, options: readonly T[]) {
   }
   return value as T;
 }
+function flag(value: unknown) {
+  return value === "true" ? (true as const) : invalid();
+}
 function limit(value: unknown) {
   if (value === undefined) {
     return undefined;
@@ -52,7 +55,7 @@ export function gameId(event: H3Event) {
   return uuid(getRouterParam(event, "gameId"));
 }
 /**
- * Validates the library list query (`status`, `ownership`, `platformId`, `limit`, `cursor`).
+ * Validates the library list query (`status`, `ownership`, `platformId`, `favorite`, `limit`, `cursor`).
  *
  * @param event - The incoming {@link H3Event}.
  * @returns The validated query; absent parameters stay `undefined`.
@@ -64,6 +67,7 @@ export function libraryQuery(event: H3Event) {
     status: q.status === undefined ? undefined : choice(q.status, statuses),
     ownership: q.ownership === undefined ? undefined : choice(q.ownership, ownerships),
     platformId: q.platformId === undefined ? undefined : uuid(q.platformId),
+    favorite: q.favorite === undefined ? undefined : flag(q.favorite),
     limit: limit(q.limit),
     cursor: q.cursor === undefined ? undefined : text(q.cursor, 1, 512),
   };

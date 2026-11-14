@@ -1,11 +1,25 @@
 <script setup lang="ts">
 import type { GameCardModel } from "../../shared/catalog";
-defineProps<{ game: GameCardModel; inLibrary?: boolean }>();
+defineProps<{
+  game: GameCardModel;
+  inLibrary?: boolean;
+  /** Shows the favorite toggle; omit it while the library state is unknown. */
+  favorite?: boolean;
+  favoriteDisabled?: boolean;
+}>();
+const emit = defineEmits<{ favorite: [] }>();
 const route = useRoute();
 </script>
 
 <template>
   <article class="game-card">
+    <FavoriteButton
+      v-if="favorite !== undefined"
+      :active="favorite"
+      :title="game.title"
+      :disabled="favoriteDisabled"
+      @toggle="emit('favorite')"
+    />
     <NuxtLink
       :to="{ path: `/games/${game.id}`, query: { query: route.query.query } }"
       class="game-link"

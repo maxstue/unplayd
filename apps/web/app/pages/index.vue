@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { SearchHit } from "#shared/catalog";
 const route = useRoute();
 const router = useRouter();
 const { isSignedIn, isLoaded } = useAuth();
@@ -31,6 +32,44 @@ async function openSuggestion(game: { id: string }, term: string) {
   await navigateTo({ path: `/games/${game.id}`, query: { query: term } });
 }
 const knownEntries = useKnownEntries();
+// Confirmed or pending toggles of this search; the hits keep the state from loading time.
+const favorites = ref<Record<string, boolean>>({});
+const favoritePending = ref<string | null>(null);
+const favoriteError = ref("");
+watch(query, () => {
+  favorites.value = {};
+  favoriteError.value = "";
+});
+function isFavorite(hit: SearchHit) {
+  return favorites.value[hit.game.id] ?? hit.library?.favorite;
+}
+function inLibrary(hit: SearchHit) {
+  return (
+    knownEntries.value[hit.game.id] ??
+    (favorites.value[hit.game.id] || (!!hit.library && hit.library.status !== null))
+  );
+}
+async function toggleFavorite(hit: SearchHit) {
+  if (favoritePending.value) {
+    return;
+  }
+  const id = hit.game.id;
+  const favorite = !isFavorite(hit);
+  favoritePending.value = id;
+  favoriteError.value = "";
+  favorites.value[id] = favorite;
+  try {
+    await $fetch(`/api/favorites/${id}`, { method: favorite ? "PUT" : "DELETE" });
+    if (favorite) {
+      knownEntries.value[id] = true;
+    }
+  } catch {
+    favorites.value[id] = !favorite;
+    favoriteError.value = `„${hit.game.title}“ konnte nicht gespeichert werden. Bitte versuche es erneut.`;
+  } finally {
+    favoritePending.value = null;
+  }
+}
 useHead({ title: "Spiele entdecken · Unplayd" });
 </script>
 
@@ -61,6 +100,7 @@ useHead({ title: "Spiele entdecken · Unplayd" });
             }}{{ nextCursor ? " · weitere verfügbar" : "" }}
           </output>
         </div>
+        <p v-if="favoriteError" role="alert" class="error-message">{{ favoriteError }}</p>
         <output v-if="status === 'loading'" class="state-message muted">
           Spiele werden gesucht …
         </output>
@@ -74,7 +114,13 @@ useHead({ title: "Spiele entdecken · Unplayd" });
         <p v-else-if="status === 'idle'" class="muted">Deine Suche beginnt hier.</p>
         <ul v-if="items.length" class="game-grid">
           <li v-for="hit in items" :key="hit.game.id">
-            <GameCard :game="hit.game" :in-library="knownEntries[hit.game.id]">
+            <GameCard
+              :game="hit.game"
+              :in-library="inLibrary(hit)"
+              :favorite="isFavorite(hit)"
+              :favorite-disabled="!!favoritePending"
+              @favorite="toggleFavorite(hit)"
+            >
               <details v-if="hit.matchedChildren.length" class="matched-children">
                 <summary>{{ hit.matchedChildren.length }} passende Zusatzinhalte</summary>
                 <ul>

@@ -313,13 +313,47 @@ select {
   border-radius: 0.35rem;
 }
 .game-card > .favorite-toggle.active,
-.favorite-action .favorite-toggle.active {
+.favorite-action .favorite-toggle.active,
+.favorite-toggle:hover:not(:disabled) {
   color: var(--accent);
+}
+.favorite-toggle {
+  transition: color 300ms ease;
 }
 .favorite-toggle svg {
   width: 17px;
   height: 17px;
   flex: none;
+  fill-opacity: 0;
+  transition: fill-opacity 350ms ease;
+}
+.favorite-toggle.active svg {
+  fill-opacity: 1;
+}
+/* Starts and ends at the resting size so the click never jumps; each turn eases in and out. */
+.favorite-toggle.popping svg {
+  animation: favorite-pop 650ms ease-in-out;
+}
+@keyframes favorite-pop {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.18);
+  }
+  75% {
+    transform: scale(0.97);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .favorite-toggle,
+  .favorite-toggle svg {
+    transition: none;
+  }
+  .favorite-toggle.popping svg {
+    animation: none;
+  }
 }
 /* Search cards reveal the toggle on hover or focus; touch devices always show it. */
 @media (hover: hover) {
@@ -366,10 +400,11 @@ select {
   text-decoration: none;
   display: block;
 }
-.game-link:hover h3 {
+/* The whole card keeps its hover state, including while over its action buttons. */
+.game-card:hover .game-link h3 {
   color: var(--accent);
 }
-.game-link:hover .game-cover {
+.game-card:hover .game-link .game-cover {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

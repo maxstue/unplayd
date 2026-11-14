@@ -3,6 +3,7 @@ import { page, userEvent } from "vite-plus/test/browser";
 import { render } from "vitest-browser-vue";
 import GameSearchField from "../../app/components/GameSearchField.vue";
 import GameCover from "../../app/components/GameCover.vue";
+import FavoriteButton from "../../app/components/FavoriteButton.vue";
 import DialogHarness from "./dialog-harness.vue";
 import type { LibraryEntryView } from "../../shared/library";
 
@@ -17,6 +18,7 @@ const entry: LibraryEntryView = {
   platformId: null,
   ownership: "owned",
   status: "backlog",
+  favorite: false,
   game,
   display: game,
   catalogStatus: "available",
@@ -105,5 +107,27 @@ describe("game search keyboard interactions", () => {
     await userEvent.keyboard("{Enter}");
     expect(search).toHaveBeenCalledExactlyOnceWith("Hollow Knight");
     expect(select).not.toHaveBeenCalled();
+  });
+});
+
+describe("favorite toggle", () => {
+  it("exposes its state as a pressed toggle and emits only when enabled", async () => {
+    const screen = await render(FavoriteButton, {
+      props: { active: false, title: game.title, disabled: false },
+    });
+    const toggle = page.getByRole("button", { name: "Hollow Knight als Favorit markieren" });
+    await expect.element(toggle).toHaveAttribute("aria-pressed", "false");
+    await toggle.click();
+    expect(screen.emitted("toggle")).toHaveLength(1);
+    await screen.rerender({ active: true, title: game.title, disabled: true });
+    await expect.element(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect.element(toggle).toBeDisabled();
+  });
+
+  it("uses a visible label instead of the generated name", async () => {
+    await render(FavoriteButton, { props: { active: true, title: game.title, label: "Favorit" } });
+    await expect
+      .element(page.getByRole("button", { name: "Favorit", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
   });
 });

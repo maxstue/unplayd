@@ -18,6 +18,7 @@ function fixture(): LibraryPageView {
         gameId: randomUUID(),
         platformId: null,
         status: "backlog",
+        favorite: false,
         ownership: "owned",
         game: null,
         display: { title: "Hades", coverUrl: null },
@@ -42,6 +43,7 @@ async function setup() {
   const transport = {
     list: vi.fn<LibraryTransport["list"]>().mockResolvedValue(initial),
     status: vi.fn<LibraryTransport["status"]>().mockResolvedValue({}),
+    favorite: vi.fn<LibraryTransport["favorite"]>().mockResolvedValue({}),
     remove: vi.fn<LibraryTransport["remove"]>().mockResolvedValue(undefined),
   };
   const filters = ref<LibraryFilters>({});
@@ -56,9 +58,9 @@ it("rolls back optimistic status and removal failures and allows retry", async (
   const { flow, transport, id } = await setup();
   const status = deferred<unknown>();
   transport.status.mockReturnValueOnce(status.promise);
-  const save = flow.mutate(id, "playing");
+  const save = flow.mutate(id, { status: "playing" });
   expect(flow.page.value?.items[0]?.status).toBe("playing");
-  await flow.mutate(id, "completed");
+  await flow.mutate(id, { status: "completed" });
   expect(transport.status).toHaveBeenCalledTimes(1);
   status.reject(new Error("offline"));
   await save;
@@ -75,10 +77,27 @@ it("rolls back optimistic status and removal failures and allows retry", async (
   expect(flow.message.value).toContain("entfernt");
 });
 
+it("toggles favorites optimistically, rolls back failures and ignores unchanged favorites", async () => {
+  const { flow, transport, id } = await setup();
+  const write = deferred<unknown>();
+  transport.favorite.mockReturnValueOnce(write.promise);
+  const save = flow.mutate(id, { favorite: true });
+  expect(flow.page.value?.items[0]).toMatchObject({ favorite: true, status: "backlog" });
+  write.reject(new Error("offline"));
+  expect(await save).toBe(false);
+  expect(flow.page.value?.items[0]?.favorite).toBe(false);
+  expect(flow.mutationError.value).toBeTruthy();
+  expect(await flow.mutate(id, { favorite: false })).toBeUndefined();
+  expect(transport.favorite).toHaveBeenCalledOnce();
+  expect(await flow.mutate(id, { favorite: true })).toBe(true);
+  expect(transport.favorite).toHaveBeenLastCalledWith(id, true);
+  expect(flow.message.value).toBe("„Hades“ als Favorit gespeichert.");
+});
+
 it("keeps a confirmed mutation when the subsequent page refresh fails", async () => {
   const { flow, transport, id } = await setup();
   transport.list.mockRejectedValueOnce(new Error("offline"));
-  expect(await flow.mutate(id, "playing")).toBe(true);
+  expect(await flow.mutate(id, { status: "playing" })).toBe(true);
   expect(flow.page.value?.items[0]?.status).toBe("playing");
   expect(flow.message.value).toContain("gespeichert");
   expect(flow.mutationError.value).toBe("");
@@ -108,7 +127,7 @@ it("keeps the list mounted while reconciling an optimistic status update", async
   const { flow, transport, id, initial } = await setup();
   const response = deferred<LibraryPageView>();
   transport.list.mockReturnValueOnce(response.promise);
-  const save = flow.mutate(id, "playing");
+  const save = flow.mutate(id, { status: "playing" });
   await Promise.resolve();
   expect(flow.loading.value).toBe(false);
   expect(flow.refreshing.value).toBe(true);
@@ -122,11 +141,11 @@ it("keeps the list mounted while reconciling an optimistic status update", async
 
 it("replaces the previous status confirmation without clearing it during the next write", async () => {
   const { flow, transport, id } = await setup();
-  await flow.mutate(id, "playing");
+  await flow.mutate(id, { status: "playing" });
   const previousMessage = flow.message.value;
   const update = deferred<unknown>();
   transport.status.mockReturnValueOnce(update.promise);
-  const save = flow.mutate(id, "completed");
+  const save = flow.mutate(id, { status: "completed" });
   expect(flow.message.value).toBe(previousMessage);
   update.resolve(undefined);
   await save;
@@ -154,7 +173,7 @@ it("does not restore an obsolete page when a pending mutation fails after naviga
   const { flow, transport, filters, id } = await setup();
   const pending = deferred<unknown>();
   transport.status.mockReturnValueOnce(pending.promise);
-  const save = flow.mutate(id, "playing");
+  const save = flow.mutate(id, { status: "playing" });
   const latest = fixture();
   transport.list.mockResolvedValueOnce(latest);
   filters.value = { status: "completed" };
@@ -175,7 +194,7 @@ it.each(["status", "removal"] as const)(
     } else {
       transport.remove.mockReturnValueOnce(write.promise);
     }
-    const save = flow.mutate(id, operation === "status" ? "playing" : undefined);
+    const save = flow.mutate(id, operation === "status" ? { status: "playing" } : undefined);
     const beforeCommit: LibraryPageView = {
       ...initial,
       items: operation === "status" ? [] : initial.items,
@@ -204,7 +223,7 @@ it("does not refresh after a pending write succeeds following unmount", async ()
   const { flow, transport, scope, id } = await setup();
   const write = deferred<unknown>();
   transport.status.mockReturnValueOnce(write.promise);
-  const save = flow.mutate(id, "playing");
+  const save = flow.mutate(id, { status: "playing" });
   scope.stop();
   write.resolve(undefined);
   expect(await save).toBe(true);
@@ -229,14 +248,22 @@ it("distinguishes load errors and empty results, and aborts on unmount", async (
 
 it("validates URL filters and permits only local library return destinations", () => {
   const platformId = randomUUID();
-  expect(libraryFilters({ status: "playing", platformId, cursor: "opaque+/=" })).toEqual({
+  expect(
+    libraryFilters({ status: "playing", platformId, favorite: "true", cursor: "opaque+/=" }),
+  ).toEqual({
     status: "playing",
     platformId,
+    favorite: "true",
     cursor: "opaque+/=",
   });
-  expect(libraryFilters({ status: "toString", platformId: "invalid", cursor: ["a", "b"] })).toEqual(
-    {},
-  );
+  expect(
+    libraryFilters({
+      status: "toString",
+      platformId: "invalid",
+      favorite: "1",
+      cursor: ["a", "b"],
+    }),
+  ).toEqual({});
   const path = `/library?status=playing&platformId=${platformId}&cursor=opaque%2B%2F%3D`;
   expect(libraryReturnPath(path)).toBe(path);
   expect(libraryReturnPath("/dashboard")).toBe("/dashboard");
@@ -257,7 +284,7 @@ it("waits for hydration before requesting the interactive list", async () => {
   const enabled = ref(false);
   const list = vi.fn<LibraryTransport["list"]>().mockResolvedValue(fixture());
   const flow = scope.run(() =>
-    useLibrary(ref({}), { list, status: vi.fn(), remove: vi.fn() }, enabled),
+    useLibrary(ref({}), { list, status: vi.fn(), favorite: vi.fn(), remove: vi.fn() }, enabled),
   )!;
   expect(list).not.toHaveBeenCalled();
   expect(flow.loading.value).toBe(true);

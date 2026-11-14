@@ -1,6 +1,7 @@
 import { computed, onScopeDispose, ref, watch, type Ref } from "vue";
 import {
   statusLabels,
+  type LibraryEntryView,
   type LibraryFilters,
   type LibraryPageView,
   type PlayStatus,
@@ -9,11 +10,25 @@ import {
 export interface LibraryTransport {
   list: (filters: LibraryFilters, signal: AbortSignal) => Promise<LibraryPageView>;
   status: (id: string, status: PlayStatus) => Promise<unknown>;
+  favorite: (id: string, favorite: boolean) => Promise<unknown>;
   remove: (id: string) => Promise<unknown>;
 }
+/** A change to one entry; omitting it removes the entry. */
+export type LibraryChange = { status: PlayStatus } | { favorite: boolean };
+
+function confirmation(entry: LibraryEntryView, change?: LibraryChange) {
+  const title = `„${entry.display.title}“`;
+  if (!change) {
+    return `${title} wurde entfernt.`;
+  }
+  if ("status" in change) {
+    return `${title}: ${statusLabels[change.status]} gespeichert.`;
+  }
+  return change.favorite ? `${title} als Favorit gespeichert.` : `${title} aus Favoriten entfernt.`;
+}
 /**
- * Loads a library page for the current filters and applies optimistic status changes and removals.
- * Failed mutations restore the previous page.
+ * Loads a library page for the current filters and applies optimistic status, favorite and removal
+ * changes. Failed mutations restore the previous page.
  *
  * @param filters - Current {@link LibraryFilters}; changes reload the page.
  * @param transport - {@link LibraryTransport} for listing and mutating entries.
@@ -78,13 +93,16 @@ export function useLibrary(
     generation++;
     controller?.abort();
   });
-  async function mutate(id: string, status?: PlayStatus) {
+  async function mutate(id: string, change?: LibraryChange) {
     if (pending.value || fetching.value || !page.value) {
       return;
     }
     const before = page.value;
     const entry = before.items.find((item) => item.gameId === id);
-    if (!entry || entry.status === status) {
+    const unchanged =
+      change &&
+      ("status" in change ? entry?.status === change.status : entry?.favorite === change.favorite);
+    if (!entry || unchanged) {
       return;
     }
     const current = generation;
@@ -92,20 +110,20 @@ export function useLibrary(
     mutationError.value = "";
     page.value = {
       ...before,
-      items: status
-        ? before.items.map((item) => (item.gameId === id ? { ...item, status } : item))
+      items: change
+        ? before.items.map((item) => (item.gameId === id ? { ...item, ...change } : item))
         : before.items.filter((item) => item.gameId !== id),
     };
     try {
-      if (status) {
-        await transport.status(id, status);
-      } else {
+      if (!change) {
         await transport.remove(id);
+      } else if ("status" in change) {
+        await transport.status(id, change.status);
+      } else {
+        await transport.favorite(id, change.favorite);
       }
       if (current === generation && !disposed) {
-        message.value = status
-          ? `„${entry.display.title}“: ${statusLabels[status]} gespeichert.`
-          : `„${entry.display.title}“ wurde entfernt.`;
+        message.value = confirmation(entry, change);
       }
       if (!disposed) {
         await refresh();

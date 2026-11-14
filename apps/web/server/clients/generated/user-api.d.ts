@@ -30,7 +30,7 @@ export interface paths {
         };
         /**
          * List the authenticated user library
-         * @description Keyset pagination ordered by creation time and entry UUID descending. Cursors are opaque and bound to the status, ownership and platform filters; use the same filters on subsequent pages. Snapshots are stored fallbacks from insertion, not a live catalog copy.
+         * @description Keyset pagination ordered by creation time and entry UUID descending. Cursors are opaque and bound to the status, ownership, platform and favorite filters; use the same filters on subsequent pages. Snapshots are stored fallbacks from insertion, not a live catalog copy.
          */
         get: operations["listLibrary"];
         put?: never;
@@ -96,11 +96,14 @@ export interface paths {
         get?: never;
         /**
          * Idempotently favorite a game
-         * @description If absent, atomically create a validated library entry with ownership wishlist and status backlog. Never overwrite existing ownership/status.
+         * @description If absent, atomically create a validated library entry with ownership wishlist and status backlog. Never overwrite existing ownership/status. Repeating the request returns the same entry; a game is favorited at most once.
          */
         put: operations["putFavorite"];
         post?: never;
-        /** Idempotently remove a favorite without removing the library entry */
+        /**
+         * Idempotently remove a favorite without removing the library entry
+         * @description Removes only the own favorite and returns 204 even when the favorite or entry is absent. The library entry and its status are preserved.
+         */
         delete: operations["deleteFavorite"];
         options?: never;
         head?: never;
@@ -226,6 +229,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/library/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get own entries for a set of games
+         * @description Returns the own entries for the requested game IDs in no particular order; games outside the library are omitted. Makes no catalog requests.
+         */
+        post: operations["lookupLibraryEntries"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -305,6 +328,12 @@ export interface components {
                 /** Format: uuid */
                 gameId: string;
             }[];
+        };
+        LibraryLookupRequest: {
+            gameIds: string[];
+        };
+        LibraryLookup: {
+            items: components["schemas"]["LibraryEntry"][];
         };
         /** @example trace_123-ABC */
         RequestId: string;
@@ -503,6 +532,8 @@ export interface operations {
                 status?: components["schemas"]["PlayStatus"];
                 ownership?: components["schemas"]["Ownership"];
                 platformId?: string;
+                /** @description Only `true` is accepted; omit the parameter to include all entries. */
+                favorite?: true;
                 limit?: number;
                 cursor?: string;
             };
@@ -725,8 +756,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -974,6 +1003,37 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    lookupLibraryEntries: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LibraryLookupRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryLookup"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             503: components["responses"]["Unavailable"];
         };
     };

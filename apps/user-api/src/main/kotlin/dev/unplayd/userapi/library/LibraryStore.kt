@@ -49,6 +49,11 @@ interface LibraryStore {
         filter: LibraryFilter,
     ): LibraryPage
 
+    suspend fun lookup(
+        userId: UUID,
+        gameIds: List<UUID>,
+    ): List<LibraryEntry>
+
     suspend fun overview(userId: UUID): LibraryOverview
 
     suspend fun platforms(userId: UUID): LibraryPlatforms
@@ -66,6 +71,18 @@ interface LibraryStore {
     ): LibraryEntry
 
     suspend fun delete(
+        userId: UUID,
+        gameId: UUID,
+    )
+
+    /** Favorites the entry, creating it as wishlist/backlog from [snapshot] when absent. */
+    suspend fun setFavorite(
+        userId: UUID,
+        gameId: UUID,
+        snapshot: GameSnapshot?,
+    ): LibraryEntry
+
+    suspend fun removeFavorite(
         userId: UUID,
         gameId: UUID,
     )
@@ -131,6 +148,7 @@ class JdbcLibraryStore(
                 conditions += "e.platform_id=?"
                 values += uuid(it)
             }
+            if (filter.favorite) conditions += "f.library_entry_id IS NOT NULL"
             filter.after?.let {
                 conditions += "(e.created_at,e.id) < (?,?)"
                 values += Timestamp.from(Instant.parse(it.createdAt))
@@ -149,12 +167,24 @@ class JdbcLibraryStore(
             val cursor =
                 if (items.size > filter.limit) {
                     page.last().let {
-                        LibraryCursor(it.createdAt, it.id, filter.status, filter.ownership, filter.platformId).encode()
+                        LibraryCursor(it.createdAt, it.id, filter.status, filter.ownership, filter.platformId, filter.favorite).encode()
                     }
                 } else {
                     null
                 }
             LibraryPage(page, cursor)
+        }
+
+    override suspend fun lookup(
+        userId: UUID,
+        gameIds: List<UUID>,
+    ): List<LibraryEntry> =
+        read { db ->
+            db.prepareStatement("$ENTRY_SELECT WHERE e.user_id=? AND e.game_id = ANY(?)").use {
+                it.setObject(1, userId)
+                it.setArray(2, db.createArrayOf("uuid", gameIds.toTypedArray()))
+                it.executeQuery().use { rows -> buildList { while (rows.next()) add(rows.entry()) } }
+            }
         }
 
     override suspend fun add(
@@ -163,28 +193,7 @@ class JdbcLibraryStore(
         snapshot: GameSnapshot,
     ): AddedEntry =
         transaction { db ->
-            val created =
-                db
-                    .prepareStatement(
-                        """
-                        INSERT INTO user_data.library_entries(user_id,game_id,platform_id,ownership,snapshot_title,snapshot_cover_url)
-                        VALUES (?,?,?,?,?,?) ON CONFLICT(user_id,game_id) DO NOTHING RETURNING id
-                        """.trimIndent(),
-                    ).use { query ->
-                        query.setObject(1, userId)
-                        query.setObject(2, uuid(request.gameId))
-                        query.setObject(3, request.platformId?.let(::uuid))
-                        query.setString(4, request.ownership)
-                        query.setString(5, snapshot.title)
-                        query.setString(6, snapshot.coverUrl)
-                        query.executeQuery().use { rows -> if (rows.next()) rows.getObject(1, UUID::class.java) else null }
-                    }
-            if (created != null) {
-                db.prepareStatement("INSERT INTO user_data.game_statuses(library_entry_id,status) VALUES (?,'backlog')").use {
-                    it.setObject(1, created)
-                    it.executeUpdate()
-                }
-            }
+            val created = db.insertEntry(userId, uuid(request.gameId), request.platformId?.let(::uuid), request.ownership, snapshot)
             val entry = requireNotNull(db.findLocked(userId, uuid(request.gameId)))
             ensureMatching(entry, request)
             AddedEntry(entry, created != null)
@@ -222,6 +231,89 @@ class JdbcLibraryStore(
             it.executeUpdate()
         }
         Unit
+    }
+
+    override suspend fun setFavorite(
+        userId: UUID,
+        gameId: UUID,
+        snapshot: GameSnapshot?,
+    ): LibraryEntry =
+        transaction { db ->
+            val entry =
+                db.findLocked(userId, gameId) ?: run {
+                    // The entry was removed after the service saw it; the caller may retry with a catalog snapshot.
+                    if (snapshot == null) throw LibraryProblem(409, "Library entry changed concurrently")
+                    db.insertEntry(userId, gameId, null, "wishlist", snapshot)
+                    requireNotNull(db.findLocked(userId, gameId))
+                }
+            if (!entry.favorite) {
+                db
+                    .prepareStatement(
+                        """
+                        WITH added AS (
+                            INSERT INTO user_data.favorites(library_entry_id) VALUES (?) ON CONFLICT DO NOTHING RETURNING library_entry_id
+                        )
+                        UPDATE user_data.library_entries SET updated_at=now() WHERE id IN (SELECT library_entry_id FROM added)
+                        """.trimIndent(),
+                    ).use {
+                        it.setObject(1, uuid(entry.id))
+                        it.executeUpdate()
+                    }
+            }
+            requireNotNull(db.findEntry(userId, gameId))
+        }
+
+    override suspend fun removeFavorite(
+        userId: UUID,
+        gameId: UUID,
+    ) = read { db ->
+        db
+            .prepareStatement(
+                """
+                WITH removed AS (
+                    DELETE FROM user_data.favorites f USING user_data.library_entries e
+                    WHERE f.library_entry_id=e.id AND e.user_id=? AND e.game_id=? RETURNING f.library_entry_id
+                )
+                UPDATE user_data.library_entries SET updated_at=now() WHERE id IN (SELECT library_entry_id FROM removed)
+                """.trimIndent(),
+            ).use {
+                it.setObject(1, userId)
+                it.setObject(2, gameId)
+                it.executeUpdate()
+            }
+        Unit
+    }
+
+    /** Inserts an entry with backlog status; returns its ID, or null if the user already tracks the game. */
+    private fun Connection.insertEntry(
+        userId: UUID,
+        gameId: UUID,
+        platformId: UUID?,
+        ownership: String,
+        snapshot: GameSnapshot,
+    ): UUID? {
+        val created =
+            prepareStatement(
+                """
+                INSERT INTO user_data.library_entries(user_id,game_id,platform_id,ownership,snapshot_title,snapshot_cover_url)
+                VALUES (?,?,?,?,?,?) ON CONFLICT(user_id,game_id) DO NOTHING RETURNING id
+                """.trimIndent(),
+            ).use { query ->
+                query.setObject(1, userId)
+                query.setObject(2, gameId)
+                query.setObject(3, platformId)
+                query.setString(4, ownership)
+                query.setString(5, snapshot.title)
+                query.setString(6, snapshot.coverUrl)
+                query.executeQuery().use { rows -> if (rows.next()) rows.getObject(1, UUID::class.java) else null }
+            }
+        if (created != null) {
+            prepareStatement("INSERT INTO user_data.game_statuses(library_entry_id,status) VALUES (?,'backlog')").use {
+                it.setObject(1, created)
+                it.executeUpdate()
+            }
+        }
+        return created
     }
 
     private fun Connection.findLocked(

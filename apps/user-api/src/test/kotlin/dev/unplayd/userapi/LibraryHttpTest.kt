@@ -352,6 +352,150 @@ class LibraryHttpTest {
             }
         }
 
+    @Test
+    fun `favorites are idempotent, preserve library state and stay isolated per user`() =
+        withLibrary { fixture ->
+            val platform = UUID.randomUUID()
+            val game = fixture.catalog.add(platform)
+            request(HttpMethod.Post, "/library", """{"gameId":"${game.id}","ownership":"owned","platformId":"$platform"}""")
+            val playing = request(HttpMethod.Put, "/library/${game.id}/status", """{"status":"playing"}""").entry()
+            fixture.catalog.status = 503
+            val favorited = request(HttpMethod.Put, "/favorites/${game.id}")
+            assertEquals(HttpStatusCode.OK, favorited.status)
+            val entry = favorited.entry()
+            assertEquals(playing.copy(favorite = true, updatedAt = entry.updatedAt), entry)
+            assertEquals(entry, request(HttpMethod.Put, "/favorites/${game.id}").entry())
+            assertEquals(1, fixture.catalog.requests.size, "Existing entries must be favorited without the catalog")
+            fixture.database.connection().use { db ->
+                assertEquals(1, db.count("SELECT count(*) FROM user_data.favorites"))
+                val duplicate =
+                    kotlin.runCatching {
+                        db.execute(
+                            "INSERT INTO user_data.favorites(library_entry_id) VALUES (?)",
+                            UUID.fromString(entry.id),
+                        )
+                    }
+                assertEquals("23505", (duplicate.exceptionOrNull() as java.sql.SQLException).sqlState)
+            }
+
+            fixture.catalog.status = null
+            val foreign = request(HttpMethod.Put, "/favorites/${game.id}", subject = second).entry()
+            assertEquals(listOf("wishlist", "backlog", null), listOf(foreign.ownership, foreign.status, foreign.platformId))
+            assertTrue(foreign.favorite)
+            assertEquals(game.title, foreign.snapshot.title)
+            assertEquals(HttpStatusCode.NoContent, request(HttpMethod.Delete, "/favorites/${game.id}", subject = second).status)
+            assertEquals(entry, request(HttpMethod.Get, "/library/${game.id}").entry())
+            assertFalse(request(HttpMethod.Get, "/library/${game.id}", subject = second).entry().favorite)
+
+            assertEquals(HttpStatusCode.NoContent, request(HttpMethod.Delete, "/favorites/${game.id}").status)
+            assertEquals(HttpStatusCode.NoContent, request(HttpMethod.Delete, "/favorites/${game.id}").status)
+            assertEquals(HttpStatusCode.NoContent, request(HttpMethod.Delete, "/favorites/${UUID.randomUUID()}").status)
+            val unfavorited = request(HttpMethod.Get, "/library/${game.id}").entry()
+            assertEquals(entry.copy(favorite = false, updatedAt = unfavorited.updatedAt), unfavorited)
+
+            val inactive = fixture.catalog.add(active = false)
+            for (id in listOf(UUID.randomUUID().toString(), inactive.id)) {
+                assertEquals(HttpStatusCode.BadRequest, request(HttpMethod.Put, "/favorites/$id").status)
+            }
+            val unavailable = fixture.catalog.add()
+            fixture.catalog.status = 503
+            assertEquals(HttpStatusCode.ServiceUnavailable, request(HttpMethod.Put, "/favorites/${unavailable.id}").status)
+            fixture.database.connection().use { db -> assertEquals(2, db.count("SELECT count(*) FROM user_data.library_entries")) }
+            assertEquals(HttpStatusCode.BadRequest, request(HttpMethod.Put, "/favorites/bad").status)
+            for (method in listOf(HttpMethod.Put, HttpMethod.Delete)) {
+                assertEquals(HttpStatusCode.Unauthorized, request(method, "/favorites/${game.id}", subject = null).status)
+            }
+        }
+
+    @Test
+    fun `favorite filter pages through own favorites and lookup returns only own entries`() =
+        withLibrary { fixture ->
+            val games = (1..4).map { fixture.catalog.add() }
+            games.forEach { request(HttpMethod.Post, "/library", """{"gameId":"${it.id}","ownership":"owned"}""") }
+            val favorites = games.take(3).map { it.id }
+            favorites.forEach { request(HttpMethod.Put, "/favorites/$it") }
+            request(HttpMethod.Put, "/favorites/${games.last().id}", subject = second)
+            val seen = mutableListOf<String>()
+            var cursor: String? = null
+            do {
+                val page =
+                    Json.decodeFromString<LibraryPage>(
+                        request(HttpMethod.Get, "/library?favorite=true&limit=2${cursor?.let { "&cursor=$it" }.orEmpty()}").bodyAsText(),
+                    )
+                seen += page.items.map { it.gameId }
+                cursor = page.nextCursor
+            } while (cursor != null)
+            assertEquals(favorites.toSet(), seen.toSet())
+            assertEquals(3, seen.size)
+            val unfiltered = Json.decodeFromString<LibraryPage>(request(HttpMethod.Get, "/library?limit=1").bodyAsText())
+            assertEquals(
+                HttpStatusCode.BadRequest,
+                request(HttpMethod.Get, "/library?favorite=true&cursor=${unfiltered.nextCursor}").status,
+            )
+            for (value in listOf("false", "1", "")) {
+                assertEquals(HttpStatusCode.BadRequest, request(HttpMethod.Get, "/library?favorite=$value").status, value)
+            }
+
+            val catalogRequests = fixture.catalog.requests.size
+            val unknown = UUID.randomUUID().toString()
+            val lookup =
+                Json.decodeFromString<dev.unplayd.userapi.library.LibraryLookup>(
+                    request(
+                        HttpMethod.Post,
+                        "/library/lookup",
+                        """{"gameIds":["${games[0].id}","${games[3].id}","$unknown"]}""",
+                    ).bodyAsText(),
+                )
+            assertEquals(mapOf(games[0].id to true, games[3].id to false), lookup.items.associate { it.gameId to it.favorite })
+            val foreign =
+                Json.decodeFromString<dev.unplayd.userapi.library.LibraryLookup>(
+                    request(HttpMethod.Post, "/library/lookup", """{"gameIds":["${games[0].id}"]}""", second).bodyAsText(),
+                )
+            assertEquals(emptyList(), foreign.items)
+            val tooMany = List(51) { "\"${UUID.randomUUID()}\"" }.joinToString(",")
+            for (body in listOf(
+                """{"gameIds":[]}""",
+                """{"gameIds":[$tooMany]}""",
+                """{"gameIds":["$unknown","$unknown"]}""",
+                """{"gameIds":["bad"]}""",
+                "{}",
+            )) {
+                assertEquals(HttpStatusCode.BadRequest, request(HttpMethod.Post, "/library/lookup", body).status, body)
+            }
+            assertEquals(catalogRequests, fixture.catalog.requests.size, "Lookups must not call the catalog")
+            assertEquals(
+                HttpStatusCode.Unauthorized,
+                request(HttpMethod.Post, "/library/lookup", """{"gameIds":["$unknown"]}""", null).status,
+            )
+        }
+
+    @Test
+    fun `concurrent favorites create one entry and races with removal stay consistent`() =
+        withLibrary { fixture ->
+            val game = fixture.catalog.add()
+            val results = coroutineScope { List(8) { async { request(HttpMethod.Put, "/favorites/${game.id}") } }.map { it.await() } }
+            assertTrue(results.all { it.status == HttpStatusCode.OK })
+            assertEquals(1, results.map { it.entry().id }.distinct().size)
+            fixture.database.connection().use { db ->
+                assertEquals(1, db.count("SELECT count(*) FROM user_data.library_entries"))
+                assertEquals(1, db.count("SELECT count(*) FROM user_data.game_statuses"))
+                assertEquals(1, db.count("SELECT count(*) FROM user_data.favorites"))
+            }
+            repeat(10) {
+                request(HttpMethod.Post, "/library", """{"gameId":"${game.id}","ownership":"wishlist"}""")
+                val (favorite, removal) =
+                    coroutineScope {
+                        val favorite = async { request(HttpMethod.Put, "/favorites/${game.id}") }
+                        val removal = async { request(HttpMethod.Delete, "/library/${game.id}") }
+                        favorite.await() to removal.await()
+                    }
+                assertTrue(favorite.status in setOf(HttpStatusCode.OK, HttpStatusCode.Conflict), favorite.status.toString())
+                assertEquals(HttpStatusCode.NoContent, removal.status)
+                request(HttpMethod.Delete, "/library/${game.id}")
+            }
+            fixture.database.connection().use { db -> assertEquals(0, db.count("SELECT count(*) FROM user_data.favorites")) }
+        }
+
     private data class Fixture(
         val database: UserApiTestDatabase,
         val catalog: CatalogStub,

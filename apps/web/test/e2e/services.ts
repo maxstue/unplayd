@@ -152,10 +152,33 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
         (item) =>
           (!url.searchParams.has("status") || item.status === url.searchParams.get("status")) &&
           (!url.searchParams.has("platformId") ||
-            item.platformId === url.searchParams.get("platformId")),
+            item.platformId === url.searchParams.get("platformId")) &&
+          (!url.searchParams.has("favorite") || item.favorite),
       ),
       nextCursor: null,
     });
+  }
+  if (path === "/library/lookup") {
+    const { gameIds } = await body(request);
+    return json(response, {
+      items: entries.filter((item) => (gameIds as string[]).includes(item.gameId)),
+    });
+  }
+  if (path.startsWith("/favorites/")) {
+    const gameId = path.split("/")[2]!;
+    let favorite = entries.find((item) => item.gameId === gameId);
+    if (request.method === "DELETE") {
+      if (favorite) {
+        favorite.favorite = false;
+      }
+      return json(response, null, 204);
+    }
+    if (!favorite) {
+      favorite = { ...entry(gameId), ownership: "wishlist", platformId: null };
+      entries.push(favorite);
+    }
+    favorite.favorite = true;
+    return json(response, favorite);
   }
   if (path === "/library" && request.method === "POST") {
     const input = await body(request);

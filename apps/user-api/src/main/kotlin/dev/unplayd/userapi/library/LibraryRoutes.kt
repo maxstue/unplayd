@@ -31,8 +31,18 @@ fun Route.libraryRoutes(
     get("/library") {
         val query = call.request.queryParameters
         val limit = query["limit"]?.let { it.toIntOrNull() ?: throw LibraryProblem(400, "Invalid limit") } ?: 20
-        val filter = LibraryFilter(query["status"], query["ownership"], query["platformId"], limit, query["cursor"])
+        val favorite =
+            when (query["favorite"]) {
+                null -> false
+                "true" -> true
+                else -> throw LibraryProblem(400, "Invalid library filter")
+            }
+        val filter = LibraryFilter(query["status"], query["ownership"], query["platformId"], favorite, limit, query["cursor"])
         call.respond(service.list(call.userId(), filter))
+    }
+    post("/library/lookup") {
+        val gameIds = call.receive<LibraryLookupRequest>().ids()
+        call.respond(service.lookup(call.userId(), gameIds))
     }
     post("/library") {
         val request = call.receive<AddLibraryEntry>()
@@ -49,6 +59,15 @@ fun Route.libraryRoutes(
     delete("/library/{gameId}") {
         val gameId = uuid(call.parameters["gameId"])
         service.delete(call.userId(), gameId)
+        call.respond(HttpStatusCode.NoContent)
+    }
+    put("/favorites/{gameId}") {
+        val gameId = uuid(call.parameters["gameId"])
+        call.respond(service.favorite(call.userId(), gameId, requireNotNull(call.callId)))
+    }
+    delete("/favorites/{gameId}") {
+        val gameId = uuid(call.parameters["gameId"])
+        service.unfavorite(call.userId(), gameId)
         call.respond(HttpStatusCode.NoContent)
     }
 }

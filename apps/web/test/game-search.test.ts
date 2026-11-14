@@ -10,6 +10,7 @@ function page(id: string, nextCursor: string | null = null): CatalogPage {
         game: { id, title: id, coverUrl: null, platforms: [] },
         childCounts: [],
         matchedChildren: [],
+        library: null,
       },
     ],
     nextCursor,

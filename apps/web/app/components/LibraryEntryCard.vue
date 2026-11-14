@@ -7,11 +7,17 @@ import {
   type PlayStatus,
 } from "#shared/library";
 defineProps<{ entry: LibraryEntryView; disabled?: boolean; saving?: boolean; returnTo: string }>();
-const emit = defineEmits<{ status: [status: PlayStatus]; remove: [] }>();
+const emit = defineEmits<{ status: [status: PlayStatus]; favorite: []; remove: [] }>();
 </script>
 
 <template>
   <article class="game-card library-card" :aria-busy="!!saving">
+    <FavoriteButton
+      :active="entry.favorite"
+      :title="entry.display.title"
+      :disabled="disabled"
+      @toggle="emit('favorite')"
+    />
     <button
       type="button"
       class="card-remove"

@@ -8,6 +8,11 @@ export const statusLabels = {
   dropped: "Abgebrochen",
 };
 export type PlayStatus = keyof typeof statusLabels;
+/** A game's state in the user's library; `status` is `null` when the game is not in the library. */
+export interface LibraryState {
+  status: PlayStatus | null;
+  favorite: boolean;
+}
 export const ownershipLabels = {
   owned: "In Besitz",
   wishlist: "Wunschliste",
@@ -18,6 +23,7 @@ export interface LibraryEntryView {
   platformId: string | null;
   ownership: keyof typeof ownershipLabels;
   status: PlayStatus;
+  favorite: boolean;
   game: GameCardModel | null;
   display: { title: string; coverUrl: string | null };
   catalogStatus: "available" | "unavailable" | "inactive" | "missing";
@@ -34,6 +40,7 @@ export interface LibraryOverview {
 export interface LibraryFilters {
   status?: PlayStatus;
   platformId?: string;
+  favorite?: "true";
   cursor?: string;
 }
 /**
@@ -51,6 +58,7 @@ export function libraryFilters(query: Record<string, unknown>): LibraryFilters {
     /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(query.platformId)
       ? { platformId: query.platformId }
       : {}),
+    ...(query.favorite === "true" ? { favorite: "true" as const } : {}),
     ...(typeof query.cursor === "string" && query.cursor.length > 0 && query.cursor.length <= 512
       ? { cursor: query.cursor }
       : {}),

@@ -101,3 +101,47 @@ test("logout clears cached ownership before another user signs in", async ({ pag
   await expect(page.getByRole("heading", { name: "Celeste", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Hollow Knight", exact: true })).not.toBeVisible();
 });
+
+test("favorites from search and the library stay separate from library state", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/?query=Celeste");
+  const favorite = page.getByRole("button", { name: "Celeste als Favorit markieren" });
+  await expect(favorite).toHaveAttribute("aria-pressed", "false");
+  await favorite.click();
+  await expect(favorite).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("In deiner Bibliothek")).toBeVisible();
+  const state = await (await request.get(`${fixture}/state`)).json();
+  expect(state.libraries.alice).toContainEqual(
+    expect.objectContaining({ ownership: "wishlist", status: "backlog", favorite: true }),
+  );
+
+  await page.goto("/library");
+  await page.getByLabel("Nur Favoriten").check();
+  await expect(page).toHaveURL(/favorite=true/);
+  await expect(page.getByRole("heading", { name: "Celeste", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Hollow Knight", exact: true })).toBeHidden();
+  await page.getByRole("button", { name: "Celeste als Favorit markieren" }).click();
+  await expect(page.getByText("„Celeste“ aus Favoriten entfernt.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Celeste", exact: true })).toBeHidden();
+  await page.getByLabel("Nur Favoriten").uncheck();
+  await expect(page.getByLabel("Spielstatus für Celeste")).toHaveValue("backlog");
+});
+
+test("the detail page favorites an existing entry without changing its status", async ({
+  page,
+}) => {
+  await page.goto(`/games/${knight}`);
+  await expect(page.getByText("In deiner Bibliothek")).toBeVisible();
+  const favorite = page.getByRole("button", { name: "Favorit" });
+  await favorite.click();
+  await expect(favorite).toHaveAttribute("aria-pressed", "true");
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Favorit" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.goto("/library?favorite=true");
+  await expect(page.getByLabel("Spielstatus für Hollow Knight")).toHaveValue("backlog");
+});

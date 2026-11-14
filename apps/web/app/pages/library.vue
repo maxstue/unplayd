@@ -24,6 +24,8 @@ const { page, loading, refreshing, failed, pending, message, mutationError, refr
         requestFetch<LibraryPageView>("/api/library", { query: { ...query, limit: 24 }, signal }),
       status: (id, status) =>
         $fetch(`/api/library/${id}/status`, { method: "PUT", body: { status } }),
+      favorite: (id, favorite) =>
+        $fetch(`/api/favorites/${id}`, { method: favorite ? "PUT" : "DELETE" }),
       remove: (id) => $fetch<null>(`/api/library/${id}`, { method: "DELETE" }),
     },
     enabled,
@@ -62,7 +64,10 @@ function clearLeavingCard(element: Element) {
     card.style.removeProperty(property);
   }
 }
-function filter(key: "status" | "platformId", value: string) {
+const filtered = computed(
+  () => !!(filters.value.status || filters.value.platformId || filters.value.favorite),
+);
+function filter(key: "status" | "platformId" | "favorite", value: string) {
   return router.push({
     path: "/library",
     query: { ...filters.value, [key]: value || undefined, cursor: undefined },
@@ -112,9 +117,15 @@ function filter(key: "status" | "platformId", value: string) {
           </option>
         </select>
       </div>
-      <NuxtLink v-if="filters.status || filters.platformId || filters.cursor" to="/library"
-        >Filter zurücksetzen</NuxtLink
+      <label class="favorite-filter"
+        ><input
+          type="checkbox"
+          :checked="!!filters.favorite"
+          @change="filter('favorite', ($event.target as HTMLInputElement).checked ? 'true' : '')"
+        />
+        Nur Favoriten</label
       >
+      <NuxtLink v-if="filtered || filters.cursor" to="/library">Filter zurücksetzen</NuxtLink>
     </div>
     <div v-if="platformsError" role="alert">
       <p>Plattformauswahl konnte nicht geladen werden.</p>
@@ -137,14 +148,14 @@ function filter(key: "status" | "platformId", value: string) {
       <div v-if="!page.items.length && !pending" class="state-message">
         <h2>
           {{
-            filters.status || filters.platformId || filters.cursor
+            filtered || filters.cursor
               ? "Keine Spiele auf dieser Seite"
               : "Deine Bibliothek wartet auf das erste Spiel"
           }}
         </h2>
         <p>
           {{
-            filters.status || filters.platformId || filters.cursor
+            filtered || filters.cursor
               ? "Ändere die Filter oder kehre zur ersten Seite zurück."
               : "Entdecke ein Spiel und füge es deiner Bibliothek hinzu."
           }}
@@ -166,7 +177,8 @@ function filter(key: "status" | "platformId", value: string) {
             :return-to="route.fullPath"
             :disabled="!!pending || refreshing"
             :saving="pending === entry.gameId"
-            @status="mutate(entry.gameId, $event)"
+            @status="mutate(entry.gameId, { status: $event })"
+            @favorite="mutate(entry.gameId, { favorite: !entry.favorite })"
             @remove="removeTarget = entry"
           />
         </li>

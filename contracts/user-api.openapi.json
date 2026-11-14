@@ -3,7 +3,7 @@
   "info": {
     "title": "Unplayd user-api",
     "version": "0.1.0",
-    "description": "Library CRUD and separate play status are implemented. Favorites, ratings, notes and next-game endpoints are contracts for subsequent tickets."
+    "description": "Library CRUD, separate play status and favorites are implemented. Ratings, notes and next-game endpoints are contracts for subsequent tickets."
   },
   "paths": {
     "/health/live": {
@@ -57,7 +57,7 @@
       "get": {
         "operationId": "listLibrary",
         "summary": "List the authenticated user library",
-        "description": "Keyset pagination ordered by creation time and entry UUID descending. Cursors are opaque and bound to the status, ownership and platform filters; use the same filters on subsequent pages. Snapshots are stored fallbacks from insertion, not a live catalog copy.",
+        "description": "Keyset pagination ordered by creation time and entry UUID descending. Cursors are opaque and bound to the status, ownership, platform and favorite filters; use the same filters on subsequent pages. Snapshots are stored fallbacks from insertion, not a live catalog copy.",
         "parameters": [
           {
             "$ref": "./common.json#/components/parameters/RequestId"
@@ -86,6 +86,16 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "favorite",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "enum": [true]
+            },
+            "description": "Only `true` is accepted; omit the parameter to include all entries."
           },
           {
             "name": "limit",
@@ -438,7 +448,7 @@
             "$ref": "./common.json#/components/responses/Unavailable"
           }
         },
-        "description": "If absent, atomically create a validated library entry with ownership wishlist and status backlog. Never overwrite existing ownership/status."
+        "description": "If absent, atomically create a validated library entry with ownership wishlist and status backlog. Never overwrite existing ownership/status. Repeating the request returns the same entry; a game is favorited at most once."
       },
       "delete": {
         "operationId": "deleteFavorite",
@@ -475,16 +485,11 @@
           "403": {
             "$ref": "./common.json#/components/responses/Forbidden"
           },
-          "404": {
-            "$ref": "./common.json#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "./common.json#/components/responses/Conflict"
-          },
           "503": {
             "$ref": "./common.json#/components/responses/Unavailable"
           }
-        }
+        },
+        "description": "Removes only the own favorite and returns 204 even when the favorite or entry is absent. The library entry and its status are preserved."
       }
     },
     "/ratings/{gameId}": {
@@ -915,6 +920,57 @@
         },
         "description": "Identity comes only from the verified session. Aggregates cover the complete own collection without pagination or catalog requests."
       }
+    },
+    "/library/lookup": {
+      "post": {
+        "operationId": "lookupLibraryEntries",
+        "summary": "Get own entries for a set of games",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryLookupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryLookup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "./common.json#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "./common.json#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "./common.json#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "./common.json#/components/responses/Unavailable"
+          }
+        },
+        "description": "Returns the own entries for the requested game IDs in no particular order; games outside the library are omitted. Makes no catalog requests."
+      }
     }
   },
   "security": [
@@ -1173,6 +1229,36 @@
                 }
               },
               "required": ["platformId", "gameId"]
+            }
+          }
+        },
+        "required": ["items"]
+      },
+      "LibraryLookupRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "gameIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": ["gameIds"]
+      },
+      "LibraryLookup": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LibraryEntry"
             }
           }
         },

@@ -63,13 +63,8 @@ export async function upstream<T>(
   task: () => Promise<{ data?: T; response: Response }>,
   service: "user" | "catalog",
   requestId: string,
-  options: boolean | UpstreamOptions = {},
+  { allowEmpty = false, signal, allowedStatuses }: UpstreamOptions = {},
 ) {
-  const {
-    allowEmpty = false,
-    signal,
-    allowedStatuses,
-  } = typeof options === "boolean" ? { allowEmpty: options } : options;
   let result;
   try {
     result = await task();

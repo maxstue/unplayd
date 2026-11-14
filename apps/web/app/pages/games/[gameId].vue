@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { kindLabels, type GameDetailView } from "#shared/catalog";
-import { libraryReturnPath, type LibraryEntryView } from "#shared/library";
+import { libraryReturnPath, ownershipLabels, type LibraryEntryView } from "#shared/library";
 definePageMeta({ middleware: "auth", key: (route) => route.params.gameId as string });
 const route = useRoute();
 const returnTo = computed(() => libraryReturnPath(route.query.returnTo));
+const backLabel = computed(() => {
+  if (!returnTo.value) {
+    return "Zurück zur Suche";
+  }
+  return returnTo.value.startsWith("/library") ? "Zurück zur Bibliothek" : "Zurück zum Dashboard";
+});
 const id = route.params.gameId as string;
 const { data: detail, status, error, refresh } = useLazyFetch<GameDetailView>(`/api/games/${id}`);
 const {
@@ -12,8 +18,8 @@ const {
   error: entryError,
   refresh: refreshEntry,
 } = useLazyFetch<LibraryEntryView>(`/api/library/${id}`);
-const knownEntries = useState<Record<string, boolean>>("known-library-entries", () => ({}));
-const ownership = ref<"owned" | "wishlist" | "subscription">("owned");
+const knownEntries = useKnownEntries();
+const ownership = ref<keyof typeof ownershipLabels>("owned");
 const platformId = ref("");
 const saving = ref(false);
 const saveError = ref("");
@@ -57,7 +63,6 @@ async function addToLibrary() {
     saving.value = false;
   }
 }
-const ownershipLabels = { owned: "In Besitz", wishlist: "Wunschliste", subscription: "Abonnement" };
 </script>
 
 <template>
@@ -65,13 +70,7 @@ const ownershipLabels = { owned: "In Besitz", wishlist: "Wunschliste", subscript
     <NuxtLink
       :to="returnTo ?? { path: '/', query: { query: route.query.query } }"
       class="back-link"
-      >{{
-        returnTo?.startsWith("/library")
-          ? "Zurück zur Bibliothek"
-          : returnTo
-            ? "Zurück zum Dashboard"
-            : "Zurück zur Suche"
-      }}</NuxtLink
+      >{{ backLabel }}</NuxtLink
     >
     <output v-if="status === 'pending'" class="state-message">
       Spieldetails werden geladen …

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ownershipLabels,
+  platformLabel,
   statusLabels,
   type LibraryEntryView,
   type PlayStatus,
@@ -36,15 +37,7 @@ const emit = defineEmits<{ status: [status: PlayStatus]; remove: [] }>();
       </GameCover>
       <h3>{{ entry.display.title }}</h3></NuxtLink
     >
-    <p class="muted">
-      {{ ownershipLabels[entry.ownership] }} ·
-      {{
-        entry.platformId
-          ? (entry.game?.platforms.find((p) => p.id === entry.platformId)?.name ??
-            "Plattform nicht verfügbar")
-          : "Ohne Plattform"
-      }}
-    </p>
+    <p class="muted">{{ ownershipLabels[entry.ownership] }} · {{ platformLabel(entry) }}</p>
     <p v-if="entry.catalogStatus !== 'available'" class="muted">
       {{
         entry.catalogStatus === "unavailable"

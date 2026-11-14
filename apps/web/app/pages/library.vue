@@ -33,7 +33,7 @@ const {
   error: platformsError,
   refresh: refreshPlatforms,
 } = await useLazyFetch("/api/library/platforms");
-const knownEntries = useState<Record<string, boolean>>("known-library-entries", () => ({}));
+const knownEntries = useKnownEntries();
 const removeTarget = ref<LibraryEntryView | null>(null);
 const heading = ref<HTMLHeadingElement | null>(null);
 async function remove(id: string) {

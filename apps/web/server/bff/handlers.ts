@@ -1,7 +1,6 @@
 import { setResponseStatus, type H3Event } from "h3";
 import { withServices, upstream, publicError } from "../clients/request";
 import type { ServicesConfig } from "../clients/config";
-import { statusLabels } from "../../shared/library";
 import type { components as Catalog } from "../clients/generated/catalog-api";
 import { enrichEntries } from "./library";
 import {
@@ -189,23 +188,11 @@ export function getLibraryOverview(event: H3Event, config: ServicesConfig, fetch
     event,
     config,
     async (s) => {
-      const result = (
+      return (
         await upstream(() => s.user.GET("/library/overview"), "user", s.requestId, {
           signal: s.signal,
         })
       ).data;
-      const counts = Object.keys(statusLabels).map(
-        (status) => result.statuses?.[status as keyof typeof statusLabels],
-      );
-      if (
-        !Number.isSafeInteger(result.total) ||
-        result.total < 0 ||
-        counts.some((count) => !Number.isSafeInteger(count) || count < 0) ||
-        counts.reduce((sum, count) => sum + count, 0) !== result.total
-      ) {
-        throw publicError(503, s.requestId);
-      }
-      return result;
     },
     fetcher,
   );

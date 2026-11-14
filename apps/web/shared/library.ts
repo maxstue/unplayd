@@ -53,3 +53,12 @@ export function libraryFilters(query: Record<string, unknown>): LibraryFilters {
 export function libraryReturnPath(value: unknown) {
   return typeof value === "string" && /^\/(library|dashboard)(\?|$)/.test(value) ? value : null;
 }
+export function platformLabel(entry: LibraryEntryView) {
+  if (!entry.platformId) {
+    return "Ohne Plattform";
+  }
+  return (
+    entry.game?.platforms.find((platform) => platform.id === entry.platformId)?.name ??
+    "Plattform nicht verfügbar"
+  );
+}

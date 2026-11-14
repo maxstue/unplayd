@@ -2,7 +2,7 @@
 const { userId } = useAuth();
 const route = useRoute();
 const isAuthPage = computed(() => /^\/sign-(in|up)\/?$/.test(route.path));
-const knownEntries = useState<Record<string, boolean>>("known-library-entries", () => ({}));
+const knownEntries = useKnownEntries();
 watch(userId, (current, previous) => {
   if (previous && current !== previous) {
     knownEntries.value = {};

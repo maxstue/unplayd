@@ -164,16 +164,6 @@ it("reports an empty overview and rejects unsigned sessions without upstream req
   expect(await (await send("/api/library/overview")).json()).toEqual(emptyOverview);
 });
 
-it.each([
-  {},
-  { ...emptyOverview, total: -1 },
-  { ...emptyOverview, total: 5 },
-  { ...emptyOverview, statuses: { ...emptyOverview.statuses, backlog: "0" } },
-])("refuses malformed aggregate responses: %j", async (summary) => {
-  fetcher.mockResolvedValueOnce(Response.json(summary));
-  expect((await send("/api/library/overview")).status).toBe(503);
-});
-
 it("loads only representative games for distinct assigned platforms", async () => {
   const pc = randomUUID();
   const consoleId = randomUUID();

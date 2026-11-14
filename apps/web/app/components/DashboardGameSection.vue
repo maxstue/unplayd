@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { LibraryPageView, PlayStatus } from "#shared/library";
+import { platformLabel, type LibraryPageView, type PlayStatus } from "#shared/library";
 defineProps<{
   title: string;
   subtitle?: string;
@@ -10,12 +10,6 @@ defineProps<{
   compact?: boolean;
 }>();
 const emit = defineEmits<{ retry: [] }>();
-function platform(entry: LibraryPageView["items"][number]) {
-  return entry.platformId
-    ? (entry.game?.platforms.find((item) => item.id === entry.platformId)?.name ??
-        "Plattform nicht verfügbar")
-    : "Ohne Plattform";
-}
 </script>
 
 <template>
@@ -69,7 +63,7 @@ function platform(entry: LibraryPageView["items"][number]) {
             ><GameCover :src="entry.display.coverUrl" :title="entry.display.title" />
             <div class="playing-info">
               <h3>{{ entry.display.title }}</h3>
-              <p>{{ platform(entry) }}</p>
+              <p>{{ platformLabel(entry) }}</p>
             </div>
             <template v-if="compact"
               ><span class="play-status"><span aria-hidden="true" /> Gerade aktiv</span

@@ -126,8 +126,8 @@ describe("favorite toggle", () => {
 
   it("uses a visible label instead of the generated name", async () => {
     await render(FavoriteButton, { props: { active: true, title: game.title, label: "Favorit" } });
-    await expect
-      .element(page.getByRole("button", { name: "Favorit", exact: true }))
-      .toHaveAttribute("aria-pressed", "true");
+    const toggle = page.getByRole("button", { name: "Favorit", exact: true });
+    await expect.element(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect.element(toggle).not.toHaveAttribute("aria-label");
   });
 });

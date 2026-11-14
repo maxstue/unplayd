@@ -318,7 +318,9 @@ select {
   color: var(--accent);
 }
 .favorite-toggle {
-  transition: color 300ms ease;
+  transition:
+    color 300ms ease,
+    opacity 150ms ease;
 }
 .favorite-toggle svg {
   width: 17px;
@@ -357,9 +359,9 @@ select {
 }
 /* Search cards reveal the toggle on hover or focus; touch devices always show it. */
 @media (hover: hover) {
-  .game-card:not(.library-card) > .favorite-toggle:not(.active) {
+  /* :where() keeps the hiding rule weaker than the hover and focus rules below. */
+  :where(.game-card:not(.library-card)) > .favorite-toggle:not(.active) {
     opacity: 0;
-    transition: opacity 120ms;
   }
   .game-card:hover > .favorite-toggle,
   .game-card:focus-within > .favorite-toggle {

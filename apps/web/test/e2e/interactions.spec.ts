@@ -109,6 +109,13 @@ test("favorites from search and the library stay separate from library state", a
   await page.goto("/?query=Celeste");
   const favorite = page.getByRole("button", { name: "Celeste als Favorit markieren" });
   await expect(favorite).toHaveAttribute("aria-pressed", "false");
+  // Pointer devices reveal the toggle on hover and keyboard focus; touch devices always show it.
+  const card = page.locator("article", { has: page.getByRole("heading", { name: "Celeste" }) });
+  await card.hover();
+  await expect(favorite).toHaveCSS("opacity", "1");
+  await page.mouse.move(0, 0);
+  await favorite.focus();
+  await expect(favorite).toHaveCSS("opacity", "1");
   await favorite.click();
   await expect(favorite).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByText("In deiner Bibliothek")).toBeVisible();

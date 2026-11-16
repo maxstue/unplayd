@@ -25,7 +25,7 @@ func Open(t testing.TB) *sql.DB {
 	}
 	catalogPassword := rand.Text()
 	// renovate: datasource=docker depName=postgres
-	const image = "postgres:18.6-bookworm"
+	const image = "postgres:18.7-bookworm"
 	container, err := postgres.Run(t.Context(), image,
 		postgres.WithDatabase("unplayd"),
 		postgres.WithUsername("postgres"),

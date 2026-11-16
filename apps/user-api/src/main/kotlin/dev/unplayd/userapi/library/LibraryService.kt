@@ -59,21 +59,53 @@ class LibraryService(
         userId: UUID,
         gameId: UUID,
         requestId: String,
-    ): LibraryEntry {
-        // Existing entries need no catalog call, so favorites keep working during catalog outages.
-        val snapshot =
-            if (store.findEntry(userId, gameId) == null) {
-                activeGame(gameId, requestId).let { GameSnapshot(it.title, it.coverUrl) }
-            } else {
-                null
-            }
-        return store.setFavorite(userId, gameId, snapshot)
-    }
+    ) = store.setFavorite(userId, gameId, snapshotIfAbsent(userId, gameId, requestId))
 
     suspend fun unfavorite(
         userId: UUID,
         gameId: UUID,
     ) = store.removeFavorite(userId, gameId)
+
+    suspend fun rate(
+        userId: UUID,
+        gameId: UUID,
+        value: Int,
+        requestId: String,
+    ): LibraryEntry {
+        SetRating(value).validate()
+        return store.setRating(userId, gameId, value, snapshotIfAbsent(userId, gameId, requestId))
+    }
+
+    suspend fun unrate(
+        userId: UUID,
+        gameId: UUID,
+    ) = store.removeRating(userId, gameId)
+
+    suspend fun note(
+        userId: UUID,
+        gameId: UUID,
+        text: String,
+        requestId: String,
+    ): LibraryEntry {
+        SetNote(text).validate()
+        return store.setNote(userId, gameId, text, snapshotIfAbsent(userId, gameId, requestId))
+    }
+
+    suspend fun removeNote(
+        userId: UUID,
+        gameId: UUID,
+    ) = store.removeNote(userId, gameId)
+
+    /** Existing entries need no catalog call, so personal data stays writable during catalog outages. */
+    private suspend fun snapshotIfAbsent(
+        userId: UUID,
+        gameId: UUID,
+        requestId: String,
+    ) = if (store.findEntry(userId, gameId) == null) {
+        activeGame(gameId, requestId).let { GameSnapshot(it.title, it.coverUrl) }
+    } else {
+        null
+    }
 
     private suspend fun activeGame(
         id: UUID,

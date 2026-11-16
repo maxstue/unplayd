@@ -61,7 +61,8 @@ a {
 }
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 button,
@@ -220,7 +221,8 @@ label {
   margin-bottom: 0.5rem;
 }
 input,
-select {
+select,
+textarea {
   min-height: 44px;
   width: 100%;
   color: var(--foreground);
@@ -529,6 +531,31 @@ output {
 .library-form > * + * {
   margin-top: 1.25rem;
 }
+.personal-review {
+  max-width: 32rem;
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1.5rem;
+}
+.personal-review > * + *,
+.personal-review form {
+  margin-top: 1.25rem;
+}
+.personal-review textarea {
+  display: block;
+  resize: vertical;
+  line-height: 1.5;
+}
+.personal-review #note-length {
+  margin-top: 0.4rem;
+  font-size: 0.8125rem;
+}
+.personal-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
 .related-games {
   margin-top: 4rem;
 }
@@ -632,7 +659,8 @@ output {
   .detail-cover {
     width: min(55%, 220px);
   }
-  .library-form button {
+  .library-form button,
+  .personal-review-actions button {
     width: 100%;
   }
 }

@@ -59,6 +59,29 @@ data class SetStatus(
 )
 
 @Serializable
+data class SetRating(
+    val value: Int,
+) {
+    fun validate() {
+        if (value !in 1..10) throw LibraryProblem(400, "Rating must be an integer from 1 to 10")
+    }
+}
+
+internal const val NOTE_MAX_LENGTH = 10_000
+
+@Serializable
+data class SetNote(
+    val text: String,
+) {
+    fun validate() {
+        // Count code points like PostgreSQL length(); NUL cannot be stored in a text column.
+        if (text.codePointCount(0, text.length) !in 1..NOTE_MAX_LENGTH || '\u0000' in text) {
+            throw LibraryProblem(400, "Note must contain 1 to $NOTE_MAX_LENGTH characters")
+        }
+    }
+}
+
+@Serializable
 data class LibraryLookupRequest(
     val gameIds: List<String>,
 ) {

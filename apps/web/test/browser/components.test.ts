@@ -4,6 +4,7 @@ import { render } from "vitest-browser-vue";
 import GameSearchField from "../../app/components/GameSearchField.vue";
 import GameCover from "../../app/components/GameCover.vue";
 import FavoriteButton from "../../app/components/FavoriteButton.vue";
+import PersonalReview from "../../app/components/PersonalReview.vue";
 import DialogHarness from "./dialog-harness.vue";
 import type { LibraryEntryView } from "../../shared/library";
 
@@ -19,6 +20,8 @@ const entry: LibraryEntryView = {
   ownership: "owned",
   status: "backlog",
   favorite: false,
+  rating: null,
+  note: null,
   game,
   display: game,
   catalogStatus: "available",
@@ -129,5 +132,41 @@ describe("favorite toggle", () => {
     const toggle = page.getByRole("button", { name: "Favorit", exact: true });
     await expect.element(toggle).toHaveAttribute("aria-pressed", "true");
     await expect.element(toggle).not.toHaveAttribute("aria-label");
+  });
+});
+
+describe("personal review", () => {
+  it("emits ratings and removals and restores the saved rating after a failed write", async () => {
+    const screen = await render(PersonalReview, {
+      props: { rating: 7, note: null, disabled: false },
+    });
+    const rating = page.getByLabelText("Bewertung (1–10)");
+    await expect.element(rating).toHaveValue("7");
+    await rating.selectOptions("9");
+    await rating.selectOptions("");
+    expect(screen.emitted("rate")).toEqual([[9], [null]]);
+    await screen.rerender({ rating: 7, note: null, disabled: true });
+    await screen.rerender({ rating: 7, note: null, disabled: false });
+    await expect.element(rating).toHaveValue("7");
+  });
+
+  it("shows notes as plain text and counts code points against the limit", async () => {
+    const note = "<b>fett</b> 🎮";
+    const screen = await render(PersonalReview, { props: { rating: null, note } });
+    const field = page.getByLabelText("Persönliche Notiz");
+    await expect.element(field).toHaveValue(note);
+    expect(document.querySelector(".personal-review b")).toBeNull();
+    await expect.element(page.getByText("13 / 10.000 Zeichen")).toBeVisible();
+    const save = page.getByRole("button", { name: "Notiz speichern" });
+    await expect.element(save).toBeDisabled();
+    await field.fill("   ");
+    await expect.element(save).toBeDisabled();
+    await field.fill("🎮".repeat(10_001));
+    await expect.element(field).toHaveAttribute("aria-invalid", "true");
+    await expect.element(save).toBeDisabled();
+    await field.fill("Neue Notiz");
+    await save.click();
+    await page.getByRole("button", { name: "Notiz löschen" }).click();
+    expect(screen.emitted("note")).toEqual([["Neue Notiz"], [null]]);
   });
 });

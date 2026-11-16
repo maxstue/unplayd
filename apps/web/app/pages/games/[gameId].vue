@@ -25,10 +25,17 @@ const saving = ref(false);
 const saveError = ref("");
 const added = ref(false);
 const missingEntry = computed(() => entryError.value?.statusCode === 404);
-const favoriteSaving = ref(false);
+const personalSaving = ref(false);
 const favoriteError = ref("");
-const canFavorite = computed(
+const reviewError = ref("");
+const reviewMessage = ref("");
+const canWritePersonal = computed(
   () => !!entry.value || (missingEntry.value && !!detail.value?.game.isActive),
+);
+// Hide personal controls only during the first load; reloading the entry after a write must keep
+// them mounted, or unsaved input such as a note draft is lost.
+const showPersonal = computed(() =>
+  entryStatus.value === "pending" ? !!entry.value || added.value : canWritePersonal.value,
 );
 watch(
   entry,
@@ -41,27 +48,79 @@ watch(
 );
 useHead({ title: () => `${detail.value?.game.title ?? "Spieldetails"} · Unplayd` });
 
-async function toggleFavorite() {
-  if (favoriteSaving.value || !canFavorite.value) {
-    return;
+type PersonalChange = Partial<Pick<LibraryEntryView, "favorite" | "rating" | "note">>;
+/**
+ * Writes personal data that the user service keeps separate from the library state. Without an
+ * entry, the first write creates it as wishlist/backlog, so the entry is loaded afterwards.
+ */
+async function writePersonal(
+  path: string,
+  method: "PUT" | "DELETE",
+  body: Record<string, unknown> | undefined,
+  change: PersonalChange,
+) {
+  if (personalSaving.value || !canWritePersonal.value) {
+    return false;
   }
-  const favorite = !entry.value?.favorite;
-  favoriteSaving.value = true;
-  favoriteError.value = "";
+  personalSaving.value = true;
   try {
-    await $fetch(`/api/favorites/${id}`, { method: favorite ? "PUT" : "DELETE" });
+    await $fetch(path, { method, body });
     knownEntries.value[id] = true;
     if (entry.value) {
-      entry.value = { ...entry.value, favorite };
+      entry.value = { ...entry.value, ...change };
     } else {
-      // Favoriting created the entry; load it with its catalog data.
       added.value = true;
       await refreshEntry();
     }
+    return true;
   } catch {
-    favoriteError.value = "Der Favorit konnte nicht gespeichert werden. Bitte versuche es erneut.";
+    return false;
   } finally {
-    favoriteSaving.value = false;
+    personalSaving.value = false;
+  }
+}
+
+async function toggleFavorite() {
+  const favorite = !entry.value?.favorite;
+  favoriteError.value = "";
+  if (
+    !(await writePersonal(`/api/favorites/${id}`, favorite ? "PUT" : "DELETE", undefined, {
+      favorite,
+    }))
+  ) {
+    favoriteError.value = "Der Favorit konnte nicht gespeichert werden. Bitte versuche es erneut.";
+  }
+}
+
+async function rate(rating: number | null) {
+  reviewError.value = "";
+  reviewMessage.value = "";
+  const saved = await writePersonal(
+    `/api/ratings/${id}`,
+    rating === null ? "DELETE" : "PUT",
+    rating === null ? undefined : { value: rating },
+    { rating },
+  );
+  if (saved) {
+    reviewMessage.value = rating === null ? "Bewertung entfernt." : "Bewertung gespeichert.";
+  } else {
+    reviewError.value = "Die Bewertung konnte nicht gespeichert werden. Bitte versuche es erneut.";
+  }
+}
+
+async function saveNote(note: string | null) {
+  reviewError.value = "";
+  reviewMessage.value = "";
+  const saved = await writePersonal(
+    `/api/notes/${id}`,
+    note === null ? "DELETE" : "PUT",
+    note === null ? undefined : { text: note },
+    { note },
+  );
+  if (saved) {
+    reviewMessage.value = note === null ? "Notiz gelöscht." : "Notiz gespeichert.";
+  } else {
+    reviewError.value = "Die Notiz konnte nicht gespeichert werden. Bitte versuche es erneut.";
   }
 }
 
@@ -143,12 +202,12 @@ async function addToLibrary() {
           <p v-if="!detail.game.isActive" class="notice">
             Dieses Spiel ist im Katalog nicht mehr aktiv und kann nicht hinzugefügt werden.
           </p>
-          <div v-if="canFavorite && entryStatus !== 'pending'" class="favorite-action">
+          <div v-if="showPersonal" class="favorite-action">
             <FavoriteButton
               :active="!!entry?.favorite"
               :title="detail.game.title"
               label="Favorit"
-              :disabled="favoriteSaving || saving"
+              :disabled="personalSaving || saving"
               @toggle="toggleFavorite()"
             />
             <p v-if="!entry && !added" class="muted">
@@ -212,6 +271,19 @@ async function addToLibrary() {
             </button>
           </form>
           <p v-if="saveError" role="alert" class="error-message">{{ saveError }}</p>
+          <PersonalReview
+            v-if="showPersonal"
+            :rating="entry?.rating ?? null"
+            :note="entry?.note ?? null"
+            :disabled="personalSaving || saving"
+            :message="reviewMessage"
+            :error="reviewError"
+            @rate="rate($event)"
+            @note="saveNote($event)"
+          />
+          <p v-if="canWritePersonal && !entry && !added" class="muted">
+            Bewertung und Notiz fügen das Spiel als Wunschliste im Backlog hinzu.
+          </p>
         </div>
       </div>
       <section v-if="detail.children.length" class="related-games" aria-labelledby="related-title">

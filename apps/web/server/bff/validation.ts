@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { getHeader, getQuery, getRouterParam, type H3Event } from "h3";
+import { noteMaxLength } from "#shared/library";
 import { abortable, InvalidInput, publicError } from "../clients/request";
 
 const uuidPattern = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -109,11 +110,10 @@ export function suggestionQuery(event: H3Event) {
   }
   return { query: text(q.query, 2, 200) };
 }
-async function body(event: H3Event, fields: string[]) {
+async function body(event: H3Event, fields: string[], maxBytes = 16 * 1024) {
   if (getHeader(event, "content-type")?.split(";")[0] !== "application/json") {
     return invalid();
   }
-  const maxBytes = 16 * 1024;
   if (Number(getHeader(event, "content-length")) > maxBytes) {
     throw publicError(413, event.context.requestId);
   }
@@ -186,6 +186,39 @@ export async function addEntryBody(event: H3Event) {
  */
 export async function statusBody(event: H3Event) {
   return { status: choice((await body(event, ["status"])).status, statuses) };
+}
+/**
+ * Reads and validates the JSON body for setting a rating.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @returns The integer `value` from 1 to 10.
+ * @throws {@link InvalidInput} for invalid JSON or fields, a 413 {@link publicError} above 16 KiB.
+ */
+export async function ratingBody(event: H3Event) {
+  const { value } = await body(event, ["value"]);
+  if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 10) {
+    return invalid();
+  }
+  return { value: value as number };
+}
+/**
+ * Reads and validates the JSON body for setting a plain text note.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @returns The `text` with 1 to {@link noteMaxLength} code points and no NUL character.
+ * @throws {@link InvalidInput} for invalid JSON or fields, a 413 {@link publicError} above 64 KiB.
+ */
+export async function noteBody(event: H3Event) {
+  // A full note of four-byte characters needs about 40 KB of UTF-8.
+  const { text } = await body(event, ["text"], 64 * 1024);
+  if (typeof text !== "string" || text.includes("\0")) {
+    return invalid();
+  }
+  const length = [...text].length;
+  if (length < 1 || length > noteMaxLength) {
+    return invalid();
+  }
+  return { text };
 }
 /**
  * Reads and validates the JSON body for a catalog batch lookup.

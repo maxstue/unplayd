@@ -70,4 +70,26 @@ fun Route.libraryRoutes(
         service.unfavorite(call.userId(), gameId)
         call.respond(HttpStatusCode.NoContent)
     }
+    put("/ratings/{gameId}") {
+        val gameId = uuid(call.parameters["gameId"])
+        val request = call.receive<SetRating>()
+        request.validate()
+        call.respond(service.rate(call.userId(), gameId, request.value, requireNotNull(call.callId)))
+    }
+    delete("/ratings/{gameId}") {
+        val gameId = uuid(call.parameters["gameId"])
+        service.unrate(call.userId(), gameId)
+        call.respond(HttpStatusCode.NoContent)
+    }
+    put("/notes/{gameId}") {
+        val gameId = uuid(call.parameters["gameId"])
+        val request = call.receive<SetNote>()
+        request.validate()
+        call.respond(service.note(call.userId(), gameId, request.text, requireNotNull(call.callId)))
+    }
+    delete("/notes/{gameId}") {
+        val gameId = uuid(call.parameters["gameId"])
+        service.removeNote(call.userId(), gameId)
+        call.respond(HttpStatusCode.NoContent)
+    }
 }

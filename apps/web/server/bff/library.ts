@@ -73,6 +73,8 @@ export async function enrichEntries(entries: Entry[], services: RequestServices)
         ownership: entry.ownership,
         status: entry.status,
         favorite: entry.favorite,
+        rating: entry.rating,
+        note: entry.note,
         game,
         display: game ? { title: game.title, coverUrl: game.coverUrl } : entry.snapshot,
         catalogStatus,

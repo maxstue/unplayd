@@ -180,6 +180,24 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     favorite.favorite = true;
     return json(response, favorite);
   }
+  const personal = /^\/(ratings|notes)\/([^/]+)$/.exec(path);
+  if (personal) {
+    const field = personal[1] === "ratings" ? "rating" : "note";
+    let target = entries.find((item) => item.gameId === personal[2]);
+    if (request.method === "DELETE") {
+      if (target) {
+        target[field] = null;
+      }
+      return json(response, null, 204);
+    }
+    const input = await body(request);
+    if (!target) {
+      target = { ...entry(personal[2]!), ownership: "wishlist", platformId: null };
+      entries.push(target);
+    }
+    Object.assign(target, { [field]: field === "rating" ? input.value : input.text });
+    return json(response, target);
+  }
   if (path === "/library" && request.method === "POST") {
     const input = await body(request);
     const added = entry(String(input.gameId));

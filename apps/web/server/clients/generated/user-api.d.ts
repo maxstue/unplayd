@@ -120,11 +120,14 @@ export interface paths {
         get?: never;
         /**
          * Set an integer rating from 1 to 10
-         * @description Create a validated wishlist/backlog entry atomically when absent; preserve existing ownership/status.
+         * @description Create a validated wishlist/backlog entry atomically when absent; preserve existing ownership/status. Existing entries are updated without catalog requests. Repeating the same value returns the unchanged entry; each user has at most one rating per game.
          */
         put: operations["putRating"];
         post?: never;
-        /** Idempotently remove a rating */
+        /**
+         * Idempotently remove a rating
+         * @description Removes only the own rating and returns 204 even when the rating or entry is absent. The library entry and its status are preserved.
+         */
         delete: operations["deleteRating"];
         options?: never;
         head?: never;
@@ -139,10 +142,16 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Set a plain text note */
+        /**
+         * Set a plain text note of up to 10000 characters
+         * @description Create a validated wishlist/backlog entry atomically when absent; preserve existing ownership/status. Existing entries are updated without catalog requests. Repeating the same value returns the unchanged entry; each user has at most one note per game.
+         */
         put: operations["putNote"];
         post?: never;
-        /** Idempotently remove a note */
+        /**
+         * Idempotently remove a note
+         * @description Removes only the own note and returns 204 even when the note or entry is absent. The library entry and its status are preserved.
+         */
         delete: operations["deleteNote"];
         options?: never;
         head?: never;
@@ -269,6 +278,7 @@ export interface components {
             status: components["schemas"]["PlayStatus"];
             favorite: boolean;
             rating: number | null;
+            /** @description Plain text; clients must render it as text, never as HTML. */
             note: string | null;
             snapshot: components["schemas"]["GameSnapshot"];
             /** Format: date-time */
@@ -300,6 +310,7 @@ export interface components {
             value: number;
         };
         SetNote: {
+            /** @description Plain text, never interpreted as HTML. Length counts Unicode code points; U+0000 is rejected. Remove a note with DELETE instead of sending an empty text. */
             text: string;
         };
         NextGame: {
@@ -818,8 +829,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -882,8 +891,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
             503: components["responses"]["Unavailable"];
         };
     };

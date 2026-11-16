@@ -86,6 +86,32 @@ interface LibraryStore {
         userId: UUID,
         gameId: UUID,
     )
+
+    /** Sets the rating, creating the entry as wishlist/backlog from [snapshot] when absent. */
+    suspend fun setRating(
+        userId: UUID,
+        gameId: UUID,
+        value: Int,
+        snapshot: GameSnapshot?,
+    ): LibraryEntry
+
+    suspend fun removeRating(
+        userId: UUID,
+        gameId: UUID,
+    )
+
+    /** Sets the note, creating the entry as wishlist/backlog from [snapshot] when absent. */
+    suspend fun setNote(
+        userId: UUID,
+        gameId: UUID,
+        text: String,
+        snapshot: GameSnapshot?,
+    ): LibraryEntry
+
+    suspend fun removeNote(
+        userId: UUID,
+        gameId: UUID,
+    )
 }
 
 class JdbcLibraryStore(
@@ -238,6 +264,79 @@ class JdbcLibraryStore(
         gameId: UUID,
         snapshot: GameSnapshot?,
     ): LibraryEntry =
+        writePersonal(userId, gameId, snapshot, { it.favorite }) { db, entryId ->
+            db.prepareStatement("INSERT INTO user_data.favorites(library_entry_id) VALUES (?) ON CONFLICT DO NOTHING").use {
+                it.setObject(1, entryId)
+                it.executeUpdate()
+            }
+        }
+
+    override suspend fun removeFavorite(
+        userId: UUID,
+        gameId: UUID,
+    ) = removePersonal("favorites", userId, gameId)
+
+    override suspend fun setRating(
+        userId: UUID,
+        gameId: UUID,
+        value: Int,
+        snapshot: GameSnapshot?,
+    ): LibraryEntry =
+        writePersonal(userId, gameId, snapshot, { it.rating == value }) { db, entryId ->
+            db
+                .prepareStatement(
+                    """
+                    INSERT INTO user_data.ratings(library_entry_id,value) VALUES (?,?)
+                    ON CONFLICT(library_entry_id) DO UPDATE SET value=EXCLUDED.value,updated_at=now()
+                    """.trimIndent(),
+                ).use {
+                    it.setObject(1, entryId)
+                    it.setInt(2, value)
+                    it.executeUpdate()
+                }
+        }
+
+    override suspend fun removeRating(
+        userId: UUID,
+        gameId: UUID,
+    ) = removePersonal("ratings", userId, gameId)
+
+    override suspend fun setNote(
+        userId: UUID,
+        gameId: UUID,
+        text: String,
+        snapshot: GameSnapshot?,
+    ): LibraryEntry =
+        writePersonal(userId, gameId, snapshot, { it.note == text }) { db, entryId ->
+            db
+                .prepareStatement(
+                    """
+                    INSERT INTO user_data.notes(library_entry_id,text) VALUES (?,?)
+                    ON CONFLICT(library_entry_id) DO UPDATE SET text=EXCLUDED.text,updated_at=now()
+                    """.trimIndent(),
+                ).use {
+                    it.setObject(1, entryId)
+                    it.setString(2, text)
+                    it.executeUpdate()
+                }
+        }
+
+    override suspend fun removeNote(
+        userId: UUID,
+        gameId: UUID,
+    ) = removePersonal("notes", userId, gameId)
+
+    /**
+     * Locks the entry, or creates it as wishlist/backlog from [snapshot], then applies [write] unless
+     * [unchanged]. Ownership and status are never touched; a change also bumps the entry timestamp.
+     */
+    private suspend fun writePersonal(
+        userId: UUID,
+        gameId: UUID,
+        snapshot: GameSnapshot?,
+        unchanged: (LibraryEntry) -> Boolean,
+        write: (Connection, UUID) -> Unit,
+    ): LibraryEntry =
         transaction { db ->
             val entry =
                 db.findLocked(userId, gameId) ?: run {
@@ -246,33 +345,30 @@ class JdbcLibraryStore(
                     db.insertEntry(userId, gameId, null, "wishlist", snapshot)
                     requireNotNull(db.findLocked(userId, gameId))
                 }
-            if (!entry.favorite) {
-                db
-                    .prepareStatement(
-                        """
-                        WITH added AS (
-                            INSERT INTO user_data.favorites(library_entry_id) VALUES (?) ON CONFLICT DO NOTHING RETURNING library_entry_id
-                        )
-                        UPDATE user_data.library_entries SET updated_at=now() WHERE id IN (SELECT library_entry_id FROM added)
-                        """.trimIndent(),
-                    ).use {
-                        it.setObject(1, uuid(entry.id))
-                        it.executeUpdate()
-                    }
+            if (!unchanged(entry)) {
+                val entryId = uuid(entry.id)
+                write(db, entryId)
+                db.prepareStatement("UPDATE user_data.library_entries SET updated_at=now() WHERE id=?").use {
+                    it.setObject(1, entryId)
+                    it.executeUpdate()
+                }
             }
             requireNotNull(db.findEntry(userId, gameId))
         }
 
-    override suspend fun removeFavorite(
+    /** Idempotently deletes the own row from a per-entry [table]; only a real removal bumps the entry timestamp. */
+    private suspend fun removePersonal(
+        table: String,
         userId: UUID,
         gameId: UUID,
     ) = read { db ->
+        require(table in setOf("favorites", "ratings", "notes"))
         db
             .prepareStatement(
                 """
                 WITH removed AS (
-                    DELETE FROM user_data.favorites f USING user_data.library_entries e
-                    WHERE f.library_entry_id=e.id AND e.user_id=? AND e.game_id=? RETURNING f.library_entry_id
+                    DELETE FROM user_data.$table p USING user_data.library_entries e
+                    WHERE p.library_entry_id=e.id AND e.user_id=? AND e.game_id=? RETURNING p.library_entry_id
                 )
                 UPDATE user_data.library_entries SET updated_at=now() WHERE id IN (SELECT library_entry_id FROM removed)
                 """.trimIndent(),

@@ -30,7 +30,7 @@ internal class UserApiTestDatabase private constructor(
             val userPassword = UUID.randomUUID().toString()
             val catalogPassword = UUID.randomUUID().toString()
             // renovate: datasource=docker depName=postgres
-            val image = "postgres:18.6-bookworm"
+            val image = "postgres:18.7-bookworm"
             val postgres =
                 PostgreSQLContainer(image)
                     .withDatabaseName("unplayd")

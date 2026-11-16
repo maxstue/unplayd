@@ -32,6 +32,11 @@ const reviewMessage = ref("");
 const canWritePersonal = computed(
   () => !!entry.value || (missingEntry.value && !!detail.value?.game.isActive),
 );
+// Hide personal controls only during the first load; reloading the entry after a write must keep
+// them mounted, or unsaved input such as a note draft is lost.
+const showPersonal = computed(() =>
+  entryStatus.value === "pending" ? !!entry.value || added.value : canWritePersonal.value,
+);
 watch(
   entry,
   (value) => {
@@ -197,7 +202,7 @@ async function addToLibrary() {
           <p v-if="!detail.game.isActive" class="notice">
             Dieses Spiel ist im Katalog nicht mehr aktiv und kann nicht hinzugefügt werden.
           </p>
-          <div v-if="canWritePersonal && entryStatus !== 'pending'" class="favorite-action">
+          <div v-if="showPersonal" class="favorite-action">
             <FavoriteButton
               :active="!!entry?.favorite"
               :title="detail.game.title"
@@ -267,7 +272,7 @@ async function addToLibrary() {
           </form>
           <p v-if="saveError" role="alert" class="error-message">{{ saveError }}</p>
           <PersonalReview
-            v-if="canWritePersonal && entryStatus !== 'pending'"
+            v-if="showPersonal"
             :rating="entry?.rating ?? null"
             :note="entry?.note ?? null"
             :disabled="personalSaving || saving"

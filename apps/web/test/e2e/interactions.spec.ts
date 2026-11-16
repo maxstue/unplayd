@@ -206,3 +206,19 @@ test("the first rating adds a missing game to the library as wishlist backlog", 
     expect.objectContaining({ ownership: "wishlist", status: "backlog", rating: 6 }),
   );
 });
+
+test("an unsaved note survives the first rating that adds the game", async ({ page }) => {
+  await page.goto(`/games/${celeste}`);
+  const note = page.getByLabel("Persönliche Notiz");
+  await note.fill("Ungespeicherter Entwurf");
+  await page.getByLabel("Bewertung (1–10)").selectOption("6");
+  await expect(page.getByText("Zur Bibliothek hinzugefügt")).toBeVisible();
+  await expect(page.getByLabel("Bewertung (1–10)")).toHaveValue("6");
+  await expect(note).toHaveValue("Ungespeicherter Entwurf");
+  await page.getByRole("button", { name: "Favorit" }).click();
+  await expect(page.getByRole("button", { name: "Favorit" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(note).toHaveValue("Ungespeicherter Entwurf");
+});

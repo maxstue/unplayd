@@ -19,6 +19,8 @@ function fixture(): LibraryPageView {
         platformId: null,
         status: "backlog",
         favorite: false,
+        rating: null,
+        note: null,
         ownership: "owned",
         game: null,
         display: { title: "Hades", coverUrl: null },

@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 const knight = "10000000-0000-4000-8000-000000000001";
+const celeste = "10000000-0000-4000-8000-000000000002";
 const fixture = "http://127.0.0.1:9347/control";
 
 test.beforeEach(async ({ context, request }) => {
@@ -151,4 +152,73 @@ test("the detail page favorites an existing entry without changing its status", 
   );
   await page.goto("/library?favorite=true");
   await expect(page.getByLabel("Spielstatus für Hollow Knight")).toHaveValue("backlog");
+});
+
+test("ratings and notes are saved in the detail view and notes render as plain text", async ({
+  page,
+  request,
+}) => {
+  page.on("dialog", () => {
+    throw new Error("A note must never execute as HTML");
+  });
+  await page.goto(`/games/${knight}`);
+  await expect(page.getByText("In deiner Bibliothek")).toBeVisible();
+  const rating = page.getByLabel("Bewertung (1–10)");
+  await rating.selectOption("8");
+  await expect(page.getByText("Bewertung gespeichert.")).toBeVisible();
+  const text = '<img src=x onerror="alert(1)"> Zweiter Durchlauf mit allen Fähigkeiten';
+  const note = page.getByLabel("Persönliche Notiz");
+  await note.fill(text);
+  await expect(page.locator("#note-length")).toHaveText(`${[...text].length} / 10.000 Zeichen`);
+  await page.getByRole("button", { name: "Notiz speichern" }).click();
+  await expect(page.getByText("Notiz gespeichert.")).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Bewertung (1–10)")).toHaveValue("8");
+  await expect(page.getByLabel("Persönliche Notiz")).toHaveValue(text);
+  await expect(page.locator("img[src=x]")).toHaveCount(0);
+  const state = await (await request.get(`${fixture}/state`)).json();
+  expect(state.libraries.alice).toContainEqual(
+    expect.objectContaining({ gameId: knight, status: "backlog", rating: 8, note: text }),
+  );
+
+  await page.getByRole("button", { name: "Notiz löschen" }).click();
+  await expect(page.getByText("Notiz gelöscht.")).toBeVisible();
+  await expect(page.getByLabel("Persönliche Notiz")).toHaveValue("");
+  await page.getByLabel("Bewertung (1–10)").selectOption("");
+  await expect(page.getByText("Bewertung entfernt.")).toBeVisible();
+  const cleared = await (await request.get(`${fixture}/state`)).json();
+  expect(cleared.libraries.alice).toContainEqual(
+    expect.objectContaining({ gameId: knight, rating: null, note: null }),
+  );
+});
+
+test("the first rating adds a missing game to the library as wishlist backlog", async ({
+  page,
+  request,
+}) => {
+  await page.goto(`/games/${celeste}`);
+  await expect(page.getByText("Bewertung und Notiz fügen das Spiel")).toBeVisible();
+  await page.getByLabel("Bewertung (1–10)").selectOption("6");
+  await expect(page.getByText("Zur Bibliothek hinzugefügt")).toBeVisible();
+  await expect(page.getByLabel("Bewertung (1–10)")).toHaveValue("6");
+  const state = await (await request.get(`${fixture}/state`)).json();
+  expect(state.libraries.alice).toContainEqual(
+    expect.objectContaining({ ownership: "wishlist", status: "backlog", rating: 6 }),
+  );
+});
+
+test("an unsaved note survives the first rating that adds the game", async ({ page }) => {
+  await page.goto(`/games/${celeste}`);
+  const note = page.getByLabel("Persönliche Notiz");
+  await note.fill("Ungespeicherter Entwurf");
+  await page.getByLabel("Bewertung (1–10)").selectOption("6");
+  await expect(page.getByText("Zur Bibliothek hinzugefügt")).toBeVisible();
+  await expect(page.getByLabel("Bewertung (1–10)")).toHaveValue("6");
+  await expect(note).toHaveValue("Ungespeicherter Entwurf");
+  await page.getByRole("button", { name: "Favorit" }).click();
+  await expect(page.getByRole("button", { name: "Favorit" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(note).toHaveValue("Ungespeicherter Entwurf");
 });

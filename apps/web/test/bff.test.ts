@@ -23,6 +23,10 @@ import status from "../server/api/library/[gameId]/status.put";
 import remove from "../server/api/library/[gameId].delete";
 import favorite from "../server/api/favorites/[gameId].put";
 import unfavorite from "../server/api/favorites/[gameId].delete";
+import rate from "../server/api/ratings/[gameId].put";
+import unrate from "../server/api/ratings/[gameId].delete";
+import note from "../server/api/notes/[gameId].put";
+import removeNote from "../server/api/notes/[gameId].delete";
 import requestId from "../server/middleware/request-id";
 import { validateServicesConfig } from "../server/clients/config";
 import type { components } from "../server/clients/generated/user-api";
@@ -85,7 +89,11 @@ function app() {
     .put("/api/library/:gameId/status", status)
     .delete("/api/library/:gameId", remove)
     .put("/api/favorites/:gameId", favorite)
-    .delete("/api/favorites/:gameId", unfavorite);
+    .delete("/api/favorites/:gameId", unfavorite)
+    .put("/api/ratings/:gameId", rate)
+    .delete("/api/ratings/:gameId", unrate)
+    .put("/api/notes/:gameId", note)
+    .delete("/api/notes/:gameId", removeNote);
   return createApp()
     .use(requestId)
     .use(
@@ -467,6 +475,8 @@ it.each([401, 403, 429, 500, 503, "invalid-json", "invalid-shape"])(
           ownership: first.ownership,
           status: first.status,
           favorite: first.favorite,
+          rating: first.rating,
+          note: first.note,
           game: null,
           display: first.snapshot,
           catalogStatus: "unavailable",
@@ -612,6 +622,70 @@ it("forwards favorites to Ktor and returns an empty 204 on removal", async () =>
     ).status,
   ).toBe(403);
   expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it("forwards ratings and notes to Ktor and returns an empty 204 on removal", async () => {
+  const text = "<b>Kein HTML</b>\nZweite Zeile 🎮";
+  fetcher
+    .mockResolvedValueOnce(Response.json({ ...first, rating: 8 }))
+    .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    .mockResolvedValueOnce(Response.json({ ...first, note: text }))
+    .mockResolvedValueOnce(new Response(null, { status: 204 }));
+  const rated = await send(`/api/ratings/${first.gameId}`, "PUT", { value: 8 });
+  expect(rated.status).toBe(200);
+  expect(await rated.json()).toMatchObject({ rating: 8 });
+  expect((await send(`/api/ratings/${first.gameId}`, "DELETE")).status).toBe(204);
+  const noted = await send(`/api/notes/${first.gameId}`, "PUT", { text });
+  expect(await noted.json()).toMatchObject({ note: text });
+  const removed = await send(`/api/notes/${first.gameId}`, "DELETE");
+  expect(removed.status).toBe(204);
+  expect(await removed.text()).toBe("");
+  expect(requests().map((request) => `${request.method} ${request.url}`)).toEqual([
+    `PUT ${config.userApiUrl}/ratings/${first.gameId}`,
+    `DELETE ${config.userApiUrl}/ratings/${first.gameId}`,
+    `PUT ${config.userApiUrl}/notes/${first.gameId}`,
+    `DELETE ${config.userApiUrl}/notes/${first.gameId}`,
+  ]);
+  expect(await requests()[0]!.json()).toEqual({ value: 8 });
+  expect(await requests()[2]!.json()).toEqual({ text });
+  expect(requests()[2]!.headers.get("Authorization")).toBe(`Bearer ${aliceToken}`);
+});
+
+it("validates ratings and notes before any upstream request", async () => {
+  for (const value of [0, 11, 7.5, "7", null, undefined]) {
+    expect((await send(`/api/ratings/${first.gameId}`, "PUT", { value })).status).toBe(400);
+  }
+  expect((await send(`/api/ratings/${first.gameId}`, "PUT", { value: 5, extra: 1 })).status).toBe(
+    400,
+  );
+  for (const text of ["", "a\0b", "x".repeat(10_001), "🎮".repeat(10_001), 5, null]) {
+    expect((await send(`/api/notes/${first.gameId}`, "PUT", { text })).status).toBe(400);
+  }
+  expect((await send("/api/ratings/invalid", "PUT", { value: 5 })).status).toBe(400);
+  expect((await send("/api/notes/invalid", "DELETE")).status).toBe(400);
+  expect(
+    (await send(`/api/notes/${first.gameId}`, "PUT", { text: "x".repeat(70_000) })).status,
+  ).toBe(413);
+  expect(
+    (
+      await send(
+        `/api/ratings/${first.gameId}`,
+        "PUT",
+        { value: 5 },
+        {
+          Origin: "https://x.example",
+        },
+      )
+    ).status,
+  ).toBe(403);
+  expect(fetcher).not.toHaveBeenCalled();
+  // A full note of four-byte characters exceeds the general 16 KiB limit but is accepted.
+  const longest = "🎮".repeat(10_000);
+  fetcher.mockResolvedValueOnce(Response.json({ ...first, note: longest }));
+  expect((await send(`/api/notes/${first.gameId}`, "PUT", { text: longest })).status).toBe(200);
+  expect(
+    (await send(`/api/library`, "POST", { gameId: first.gameId, extra: longest })).status,
+  ).toBe(413);
 });
 
 it("forwards the favorite filter and rejects other values", async () => {

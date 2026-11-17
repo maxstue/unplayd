@@ -7,6 +7,7 @@ import dev.unplayd.userapi.library.JdbcLibraryStore
 import dev.unplayd.userapi.library.LibraryEntry
 import dev.unplayd.userapi.library.LibraryPage
 import dev.unplayd.userapi.library.LibraryService
+import dev.unplayd.userapi.library.SetNote
 import io.ktor.client.request.header
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
@@ -494,6 +495,157 @@ class LibraryHttpTest {
                 request(HttpMethod.Delete, "/library/${game.id}")
             }
             fixture.database.connection().use { db -> assertEquals(0, db.count("SELECT count(*) FROM user_data.favorites")) }
+        }
+
+    @Test
+    fun `ratings and notes are created, changed and removed without touching library state`() =
+        withLibrary { fixture ->
+            val platform = UUID.randomUUID()
+            val game = fixture.catalog.add(platform)
+            request(HttpMethod.Post, "/library", """{"gameId":"${game.id}","ownership":"owned","platformId":"$platform"}""")
+            val playing = request(HttpMethod.Put, "/library/${game.id}/status", """{"status":"playing"}""").entry()
+            fixture.catalog.status = 503
+            val rated = request(HttpMethod.Put, "/ratings/${game.id}", """{"value":7}""")
+            assertEquals(HttpStatusCode.OK, rated.status)
+            var entry = rated.entry()
+            assertEquals(playing.copy(rating = 7, updatedAt = entry.updatedAt), entry)
+            assertEquals(entry, request(HttpMethod.Put, "/ratings/${game.id}", """{"value":7}""").entry())
+            entry = request(HttpMethod.Put, "/ratings/${game.id}", """{"value":10}""").entry()
+            assertEquals(10, entry.rating)
+            val text = "Bosskampf <script>alert(1)</script> & \"Endgegner\"\nZweite Zeile 🎮"
+            val noted = request(HttpMethod.Put, "/notes/${game.id}", Json.encodeToString(SetNote(text))).entry()
+            assertEquals(entry.copy(note = text, updatedAt = noted.updatedAt), noted)
+            val longest = "🎮".repeat(10_000)
+            assertEquals(longest, request(HttpMethod.Put, "/notes/${game.id}", Json.encodeToString(SetNote(longest))).entry().note)
+            assertEquals(1, fixture.catalog.requests.size, "Existing entries must be rated and noted without the catalog")
+            fixture.database.connection().use { db ->
+                assertEquals(1, db.count("SELECT count(*) FROM user_data.ratings"))
+                assertEquals(1, db.count("SELECT count(*) FROM user_data.notes"))
+                for (value in listOf(0, 11)) {
+                    val violation =
+                        kotlin.runCatching {
+                            db.execute("UPDATE user_data.ratings SET value=?", value)
+                        }
+                    assertEquals("23514", (violation.exceptionOrNull() as java.sql.SQLException).sqlState)
+                }
+                val tooLong = kotlin.runCatching { db.execute("UPDATE user_data.notes SET text=?", longest + "x") }
+                assertEquals("23514", (tooLong.exceptionOrNull() as java.sql.SQLException).sqlState)
+            }
+
+            for (body in listOf(
+                """{"value":0}""",
+                """{"value":11}""",
+                """{"value":7.5}""",
+                """{"value":null}""",
+                """{"value":7,"extra":1}""",
+                "{}",
+            )) {
+                assertEquals(HttpStatusCode.BadRequest, request(HttpMethod.Put, "/ratings/${game.id}", body).status, body)
+            }
+            for (body in listOf(
+                Json.encodeToString(SetNote("")),
+                Json.encodeToString(SetNote(longest + "x")),
+                Json.encodeToString(SetNote("a\u0000b")),
+                """{"text":null}""",
+                """{"text":"a","extra":1}""",
+            )) {
+                assertEquals(HttpStatusCode.BadRequest, request(HttpMethod.Put, "/notes/${game.id}", body).status, body.take(40))
+            }
+            assertEquals(HttpStatusCode.BadRequest, request(HttpMethod.Put, "/ratings/bad", """{"value":5}""").status)
+            assertEquals(HttpStatusCode.BadRequest, request(HttpMethod.Delete, "/notes/bad").status)
+
+            val beforeRemoval = request(HttpMethod.Get, "/library/${game.id}").entry()
+            assertEquals(listOf(10, longest), listOf(beforeRemoval.rating, beforeRemoval.note))
+            for (path in listOf("/ratings", "/notes")) {
+                repeat(2) { assertEquals(HttpStatusCode.NoContent, request(HttpMethod.Delete, "$path/${game.id}").status) }
+                assertEquals(HttpStatusCode.NoContent, request(HttpMethod.Delete, "$path/${UUID.randomUUID()}").status)
+            }
+            val removed = request(HttpMethod.Get, "/library/${game.id}").entry()
+            assertEquals(playing.copy(updatedAt = removed.updatedAt), removed)
+            for (method in listOf(HttpMethod.Put, HttpMethod.Delete)) {
+                for (path in listOf("/ratings", "/notes")) {
+                    val body = if (path == "/ratings") """{"value":5}""" else """{"text":"x"}"""
+                    assertEquals(HttpStatusCode.Unauthorized, request(method, "$path/${game.id}", body, subject = null).status)
+                }
+            }
+        }
+
+    @Test
+    fun `first rating or note creates a wishlist entry and stays isolated per user`() =
+        withLibrary { fixture ->
+            val game = fixture.catalog.add()
+            val rated = request(HttpMethod.Put, "/ratings/${game.id}", """{"value":8}""").entry()
+            assertEquals(listOf("wishlist", "backlog", null), listOf(rated.ownership, rated.status, rated.platformId))
+            assertEquals(game.title, rated.snapshot.title)
+            assertFalse(rated.favorite)
+            val other = fixture.catalog.add()
+            val noted = request(HttpMethod.Put, "/notes/${other.id}", """{"text":"Später spielen"}""").entry()
+            assertEquals(
+                listOf("wishlist", "backlog", null, "Später spielen"),
+                listOf(noted.ownership, noted.status, noted.rating, noted.note),
+            )
+
+            // The second user never sees or changes the first user's data.
+            val foreign = request(HttpMethod.Put, "/notes/${game.id}", """{"text":"Meine Notiz"}""", second).entry()
+            assertEquals(listOf(null, "Meine Notiz"), listOf(foreign.rating, foreign.note))
+            assertEquals(HttpStatusCode.NoContent, request(HttpMethod.Delete, "/ratings/${game.id}", subject = second).status)
+            assertEquals(HttpStatusCode.NoContent, request(HttpMethod.Delete, "/notes/${other.id}", subject = second).status)
+            val own = request(HttpMethod.Get, "/library/${game.id}").entry()
+            assertEquals(listOf(8, null), listOf(own.rating, own.note))
+            assertEquals("Später spielen", request(HttpMethod.Get, "/library/${other.id}").entry().note)
+            assertEquals(HttpStatusCode.NotFound, request(HttpMethod.Get, "/library/${other.id}", subject = second).status)
+            val listed = Json.decodeFromString<LibraryPage>(request(HttpMethod.Get, "/library", subject = second).bodyAsText())
+            assertEquals(listOf("Meine Notiz"), listed.items.map { it.note })
+
+            val inactive = fixture.catalog.add(active = false)
+            for (id in listOf(UUID.randomUUID().toString(), inactive.id)) {
+                assertEquals(HttpStatusCode.BadRequest, request(HttpMethod.Put, "/ratings/$id", """{"value":5}""").status)
+                assertEquals(HttpStatusCode.BadRequest, request(HttpMethod.Put, "/notes/$id", """{"text":"x"}""").status)
+            }
+            val unavailable = fixture.catalog.add()
+            fixture.catalog.status = 503
+            assertEquals(HttpStatusCode.ServiceUnavailable, request(HttpMethod.Put, "/ratings/${unavailable.id}", """{"value":5}""").status)
+            fixture.database.connection().use { db -> assertEquals(3, db.count("SELECT count(*) FROM user_data.library_entries")) }
+        }
+
+    @Test
+    fun `concurrent ratings and notes create one entry and races with removal stay consistent`() =
+        withLibrary { fixture ->
+            val game = fixture.catalog.add()
+            val results =
+                coroutineScope {
+                    (1..8)
+                        .map { value ->
+                            async {
+                                if (value % 2 == 0) {
+                                    request(HttpMethod.Put, "/ratings/${game.id}", """{"value":$value}""")
+                                } else {
+                                    request(HttpMethod.Put, "/notes/${game.id}", """{"text":"Notiz $value"}""")
+                                }
+                            }
+                        }.map { it.await() }
+                }
+            assertTrue(results.all { it.status == HttpStatusCode.OK })
+            assertEquals(1, results.map { it.entry().id }.distinct().size)
+            fixture.database.connection().use { db ->
+                assertEquals(1, db.count("SELECT count(*) FROM user_data.library_entries"))
+                assertEquals(1, db.count("SELECT count(*) FROM user_data.game_statuses"))
+                assertEquals(1, db.count("SELECT count(*) FROM user_data.ratings"))
+                assertEquals(1, db.count("SELECT count(*) FROM user_data.notes"))
+            }
+            repeat(10) {
+                request(HttpMethod.Post, "/library", """{"gameId":"${game.id}","ownership":"wishlist"}""")
+                val (rating, removal) =
+                    coroutineScope {
+                        val rating = async { request(HttpMethod.Put, "/ratings/${game.id}", """{"value":3}""") }
+                        val removal = async { request(HttpMethod.Delete, "/library/${game.id}") }
+                        rating.await() to removal.await()
+                    }
+                assertTrue(rating.status in setOf(HttpStatusCode.OK, HttpStatusCode.Conflict), rating.status.toString())
+                assertEquals(HttpStatusCode.NoContent, removal.status)
+                request(HttpMethod.Delete, "/library/${game.id}")
+            }
+            fixture.database.connection().use { db -> assertEquals(0, db.count("SELECT count(*) FROM user_data.ratings")) }
         }
 
     private data class Fixture(

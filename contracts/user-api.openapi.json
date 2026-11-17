@@ -3,7 +3,7 @@
   "info": {
     "title": "Unplayd user-api",
     "version": "0.1.0",
-    "description": "Library CRUD, separate play status and favorites are implemented. Ratings, notes and next-game endpoints are contracts for subsequent tickets."
+    "description": "Library CRUD, separate play status, favorites, ratings and notes are implemented. Next-game endpoints are contracts for subsequent tickets."
   },
   "paths": {
     "/health/live": {
@@ -555,7 +555,7 @@
             }
           }
         },
-        "description": "Create a validated wishlist/backlog entry atomically when absent; preserve existing ownership/status."
+        "description": "Create a validated wishlist/backlog entry atomically when absent; preserve existing ownership/status. Existing entries are updated without catalog requests. Repeating the same value returns the unchanged entry; each user has at most one rating per game."
       },
       "delete": {
         "operationId": "deleteRating",
@@ -592,22 +592,17 @@
           "403": {
             "$ref": "./common.json#/components/responses/Forbidden"
           },
-          "404": {
-            "$ref": "./common.json#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "./common.json#/components/responses/Conflict"
-          },
           "503": {
             "$ref": "./common.json#/components/responses/Unavailable"
           }
-        }
+        },
+        "description": "Removes only the own rating and returns 204 even when the rating or entry is absent. The library entry and its status are preserved."
       }
     },
     "/notes/{gameId}": {
       "put": {
         "operationId": "putNote",
-        "summary": "Set a plain text note",
+        "summary": "Set a plain text note of up to 10000 characters",
         "parameters": [
           {
             "$ref": "./common.json#/components/parameters/RequestId"
@@ -666,7 +661,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Create a validated wishlist/backlog entry atomically when absent; preserve existing ownership/status. Existing entries are updated without catalog requests. Repeating the same value returns the unchanged entry; each user has at most one note per game."
       },
       "delete": {
         "operationId": "deleteNote",
@@ -703,16 +699,11 @@
           "403": {
             "$ref": "./common.json#/components/responses/Forbidden"
           },
-          "404": {
-            "$ref": "./common.json#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "./common.json#/components/responses/Conflict"
-          },
           "503": {
             "$ref": "./common.json#/components/responses/Unavailable"
           }
-        }
+        },
+        "description": "Removes only the own note and returns 204 even when the note or entry is absent. The library entry and its status are preserved."
       }
     },
     "/next-game": {
@@ -1038,7 +1029,8 @@
           "note": {
             "type": "string",
             "maxLength": 10000,
-            "nullable": true
+            "nullable": true,
+            "description": "Plain text; clients must render it as text, never as HTML."
           },
           "snapshot": {
             "$ref": "#/components/schemas/GameSnapshot"
@@ -1134,7 +1126,9 @@
         "properties": {
           "text": {
             "type": "string",
-            "maxLength": 10000
+            "minLength": 1,
+            "maxLength": 10000,
+            "description": "Plain text, never interpreted as HTML. Length counts Unicode code points; U+0000 is rejected. Remove a note with DELETE instead of sending an empty text."
           }
         },
         "required": ["text"]

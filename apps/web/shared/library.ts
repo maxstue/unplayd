@@ -13,6 +13,8 @@ export interface LibraryState {
   status: PlayStatus | null;
   favorite: boolean;
 }
+/** Maximum note length in Unicode code points, matching the user service. */
+export const noteMaxLength = 10_000;
 export const ownershipLabels = {
   owned: "In Besitz",
   wishlist: "Wunschliste",
@@ -24,6 +26,8 @@ export interface LibraryEntryView {
   ownership: keyof typeof ownershipLabels;
   status: PlayStatus;
   favorite: boolean;
+  rating: number | null;
+  note: string | null;
   game: GameCardModel | null;
   display: { title: string; coverUrl: string | null };
   catalogStatus: "available" | "unavailable" | "inactive" | "missing";

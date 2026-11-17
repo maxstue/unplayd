@@ -72,6 +72,30 @@ internal class TestUsers(
                 userId: UUID,
                 gameId: UUID,
             ) = error("Not used by identity tests")
+
+            override suspend fun setRating(
+                userId: UUID,
+                gameId: UUID,
+                value: Int,
+                snapshot: GameSnapshot?,
+            ) = error("Not used by identity tests")
+
+            override suspend fun removeRating(
+                userId: UUID,
+                gameId: UUID,
+            ) = error("Not used by identity tests")
+
+            override suspend fun setNote(
+                userId: UUID,
+                gameId: UUID,
+                text: String,
+                snapshot: GameSnapshot?,
+            ) = error("Not used by identity tests")
+
+            override suspend fun removeNote(
+                userId: UUID,
+                gameId: UUID,
+            ) = error("Not used by identity tests")
         }
 
     override suspend fun resolve(subject: String): LocalUser {

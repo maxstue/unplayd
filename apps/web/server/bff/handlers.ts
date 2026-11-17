@@ -15,6 +15,8 @@ import {
   catalogQuery,
   gameId,
   libraryQuery,
+  noteBody,
+  ratingBody,
   statusBody,
   suggestionQuery,
 } from "./validation";
@@ -395,6 +397,114 @@ export function removeFavorite(event: H3Event, config: ServicesConfig, fetcher?:
       const id = gameId(event);
       await upstream(
         () => s.user.DELETE("/favorites/{gameId}", { params: { path: { gameId: id } } }),
+        "user",
+        s.requestId,
+        { allowEmpty: true, signal: s.signal },
+      );
+      setResponseStatus(event, 204);
+      return null;
+    },
+    fetcher,
+  );
+}
+/**
+ * Sets the user's rating from the validated {@link ratingBody}; the user service adds the game to
+ * the library as wishlist/backlog if absent.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The updated entry.
+ */
+export function setRating(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
+  return withUserService(
+    event,
+    config,
+    async (s) => {
+      const id = gameId(event);
+      const body = await ratingBody(event);
+      return (
+        await upstream(
+          () => s.user.PUT("/ratings/{gameId}", { params: { path: { gameId: id } }, body }),
+          "user",
+          s.requestId,
+          { signal: s.signal },
+        )
+      ).data;
+    },
+    fetcher,
+  );
+}
+/**
+ * Removes the user's rating without touching the library entry and responds with 204.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns `null`.
+ */
+export function removeRating(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
+  return withUserService(
+    event,
+    config,
+    async (s) => {
+      const id = gameId(event);
+      await upstream(
+        () => s.user.DELETE("/ratings/{gameId}", { params: { path: { gameId: id } } }),
+        "user",
+        s.requestId,
+        { allowEmpty: true, signal: s.signal },
+      );
+      setResponseStatus(event, 204);
+      return null;
+    },
+    fetcher,
+  );
+}
+/**
+ * Sets the user's plain text note from the validated {@link noteBody}; the user service adds the
+ * game to the library as wishlist/backlog if absent.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The updated entry.
+ */
+export function setNote(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
+  return withUserService(
+    event,
+    config,
+    async (s) => {
+      const id = gameId(event);
+      const body = await noteBody(event);
+      return (
+        await upstream(
+          () => s.user.PUT("/notes/{gameId}", { params: { path: { gameId: id } }, body }),
+          "user",
+          s.requestId,
+          { signal: s.signal },
+        )
+      ).data;
+    },
+    fetcher,
+  );
+}
+/**
+ * Removes the user's note without touching the library entry and responds with 204.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns `null`.
+ */
+export function removeNote(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
+  return withUserService(
+    event,
+    config,
+    async (s) => {
+      const id = gameId(event);
+      await upstream(
+        () => s.user.DELETE("/notes/{gameId}", { params: { path: { gameId: id } } }),
         "user",
         s.requestId,
         { allowEmpty: true, signal: s.signal },

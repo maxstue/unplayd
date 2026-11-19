@@ -56,6 +56,17 @@ interface LibraryStore {
 
     suspend fun overview(userId: UUID): LibraryOverview
 
+    /**
+     * Returns the own backlog entry at index [pick] (bound = candidate count) in a stable order, or null without candidates.
+     * [excludeGameId] is skipped while other candidates remain. Read-only.
+     */
+    suspend fun drawBacklog(
+        userId: UUID,
+        platformId: UUID?,
+        excludeGameId: UUID?,
+        pick: (Int) -> Int,
+    ): LibraryEntry?
+
     suspend fun platforms(userId: UUID): LibraryPlatforms
 
     suspend fun add(
@@ -140,6 +151,56 @@ class JdbcLibraryStore(
                     it.executeQuery().use { rows -> while (rows.next()) counts[rows.getString(1)] = rows.getInt(2) }
                 }
             LibraryOverview(counts.values.sum(), counts)
+        }
+
+    override suspend fun drawBacklog(
+        userId: UUID,
+        platformId: UUID?,
+        excludeGameId: UUID?,
+        pick: (Int) -> Int,
+    ): LibraryEntry? =
+        transaction { db ->
+            // Count and selection must see the same snapshot so every index maps to an existing candidate.
+            db.createStatement().use { it.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY") }
+            val conditions = mutableListOf("e.user_id=?", "s.status='backlog'")
+            val values = mutableListOf<Any>(userId)
+            platformId?.let {
+                conditions += "e.platform_id=?"
+                values += it
+            }
+            val (total, others) =
+                db
+                    .prepareStatement(
+                        """
+                        SELECT count(*),count(*) FILTER (WHERE e.game_id IS DISTINCT FROM ?::uuid)
+                        FROM user_data.library_entries e JOIN user_data.game_statuses s ON s.library_entry_id=e.id
+                        WHERE ${conditions.joinToString(" AND ")}
+                        """.trimIndent(),
+                    ).use { query ->
+                        query.setObject(1, excludeGameId)
+                        values.forEachIndexed { index, value -> query.setObject(index + 2, value) }
+                        query.executeQuery().use { rows ->
+                            rows.next()
+                            rows.getInt(1) to rows.getInt(2)
+                        }
+                    }
+            if (total == 0) return@transaction null
+            // A lone excluded candidate stays selectable.
+            if (excludeGameId != null && others > 0) {
+                conditions += "e.game_id<>?"
+                values += excludeGameId
+            }
+            val bound = if (others > 0) others else total
+            val index = pick(bound)
+            check(index in 0 until bound) { "Pick $index is outside 0 until $bound" }
+            db
+                .prepareStatement(
+                    "$ENTRY_SELECT WHERE ${conditions.joinToString(" AND ")} ORDER BY e.created_at,e.id OFFSET ? LIMIT 1",
+                ).use { query ->
+                    values.forEachIndexed { position, value -> query.setObject(position + 1, value) }
+                    query.setInt(values.size + 1, index)
+                    query.executeQuery().use { rows -> if (rows.next()) rows.entry() else null }
+                }
         }
 
     override suspend fun platforms(userId: UUID): LibraryPlatforms =

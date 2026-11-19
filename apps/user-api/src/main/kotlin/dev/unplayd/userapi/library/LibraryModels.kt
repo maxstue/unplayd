@@ -98,6 +98,11 @@ data class LibraryLookup(
 )
 
 @Serializable
+data class NextGame(
+    val entry: LibraryEntry?,
+)
+
+@Serializable
 data class LibraryPage(
     val items: List<LibraryEntry>,
     val nextCursor: String?,

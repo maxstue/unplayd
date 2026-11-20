@@ -2,10 +2,13 @@ package dev.unplayd.userapi.library
 
 import dev.unplayd.userapi.catalog.CatalogClient
 import java.util.UUID
+import kotlin.random.Random
 
 class LibraryService(
     private val store: LibraryStore,
     private val catalog: CatalogClient,
+    /** Returns an index in `0 until bound`; replaceable for deterministic tests. */
+    private val pick: (bound: Int) -> Int = { Random.nextInt(it) },
 ) {
     suspend fun add(
         userId: UUID,
@@ -33,6 +36,13 @@ class LibraryService(
     suspend fun overview(userId: UUID) = store.overview(userId)
 
     suspend fun platforms(userId: UUID) = store.platforms(userId)
+
+    /** Uniformly draws from the complete own backlog without changing any state or calling the catalog. */
+    suspend fun drawNextGame(
+        userId: UUID,
+        platformId: UUID?,
+        excludeGameId: UUID?,
+    ) = NextGame(store.drawBacklog(userId, platformId, excludeGameId, pick))
 
     suspend fun list(
         userId: UUID,

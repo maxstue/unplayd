@@ -7,6 +7,7 @@ import dev.unplayd.userapi.library.JdbcLibraryStore
 import dev.unplayd.userapi.library.LibraryEntry
 import dev.unplayd.userapi.library.LibraryPage
 import dev.unplayd.userapi.library.LibraryService
+import dev.unplayd.userapi.library.NextGame
 import dev.unplayd.userapi.library.SetNote
 import io.ktor.client.request.header
 import io.ktor.client.request.request
@@ -27,10 +28,13 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.sql.Connection
+import java.sql.Timestamp
+import java.time.Instant
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -648,14 +652,120 @@ class LibraryHttpTest {
             fixture.database.connection().use { db -> assertEquals(0, db.count("SELECT count(*) FROM user_data.ratings")) }
         }
 
+    @Test
+    fun `next game draws uniformly from the whole own backlog without changing state`() =
+        withLibrary { fixture ->
+            val empty = request(HttpMethod.Get, "/next-game")
+            assertEquals(HttpStatusCode.OK, empty.status)
+            assertEquals("""{"entry":null}""", empty.bodyAsText())
+            val user = JdbcUserStore(fixture.database.dataSource).resolve(first)
+            val foreign = JdbcUserStore(fixture.database.dataSource).resolve(second)
+            val platform = UUID.randomUUID()
+            val otherPlatform = UUID.randomUUID()
+            val (onPlatform, onOtherPlatform) =
+                fixture.database.connection().use { db ->
+                    val onPlatform = (0 until 60).map { db.insertEntry(user.id, "backlog", platform, it) }
+                    val onOtherPlatform = db.insertEntry(user.id, "backlog", otherPlatform, 60)
+                    for ((index, status) in listOf("playing", "paused", "completed", "dropped").withIndex()) {
+                        db.insertEntry(user.id, status, platform, 61 + index)
+                    }
+                    repeat(3) { db.insertEntry(foreign.id, "backlog", platform, 70 + it) }
+                    val personal = db.entryId(onPlatform.first())
+                    db.execute("INSERT INTO user_data.favorites(library_entry_id) VALUES (?)", personal)
+                    db.execute("INSERT INTO user_data.ratings(library_entry_id,value) VALUES (?,7)", personal)
+                    db.execute("INSERT INTO user_data.notes(library_entry_id,text) VALUES (?,'Irgendwann')", personal)
+                    onPlatform to onOtherPlatform
+                }
+            val before = fixture.database.connection().use { it.state() }
+
+            // Every index maps to a distinct candidate, so a uniform pick makes every candidate equally likely.
+            val drawn =
+                (0 until 61).map { index ->
+                    fixture.picker.next = { index }
+                    request(HttpMethod.Get, "/next-game").nextGame()!!
+                }
+            assertEquals(List(61) { 61 }, fixture.picker.bounds)
+            assertEquals((onPlatform + onOtherPlatform).map(UUID::toString), drawn.map { it.gameId })
+            assertTrue(drawn.all { it.status == "backlog" })
+            val favorite = drawn.first()
+            assertEquals(listOf(true, 7, "Irgendwann"), listOf(favorite.favorite, favorite.rating, favorite.note))
+
+            // The oldest backlog entry is not on the first list page but still drawable.
+            val firstPage = Json.decodeFromString<LibraryPage>(request(HttpMethod.Get, "/library?status=backlog&limit=50").bodyAsText())
+            assertNotNull(firstPage.nextCursor)
+            assertFalse(firstPage.items.any { it.gameId == onPlatform.first().toString() })
+            fixture.picker.bounds.clear()
+            fixture.picker.next = { 0 }
+            assertEquals(onPlatform.first().toString(), request(HttpMethod.Get, "/next-game?platformId=$platform").nextGame()?.gameId)
+            fixture.picker.next = { it - 1 }
+            assertEquals(onPlatform.last().toString(), request(HttpMethod.Get, "/next-game?platformId=$platform").nextGame()?.gameId)
+            assertEquals(
+                onOtherPlatform.toString(),
+                request(HttpMethod.Get, "/next-game?platformId=$otherPlatform").nextGame()?.gameId,
+            )
+            assertEquals(listOf(60, 60, 1), fixture.picker.bounds)
+            assertEquals("""{"entry":null}""", request(HttpMethod.Get, "/next-game?platformId=${UUID.randomUUID()}").bodyAsText())
+            assertEquals(3, fixture.picker.bounds.size, "No candidates must not draw")
+
+            fixture.database.connection().use { assertEquals(before, it.state()) }
+            assertEquals(0, fixture.catalog.requests.size)
+        }
+
+    @Test
+    fun `next game excludes the previous game only while alternatives exist`() =
+        withLibrary { fixture ->
+            val user = JdbcUserStore(fixture.database.dataSource).resolve(first)
+            val platform = UUID.randomUUID()
+            val otherPlatform = UUID.randomUUID()
+            val (only, other, playing) =
+                fixture.database.connection().use { db ->
+                    listOf(
+                        db.insertEntry(user.id, "backlog", platform, 0),
+                        db.insertEntry(user.id, "backlog", otherPlatform, 1),
+                        db.insertEntry(user.id, "playing", platform, 2),
+                    )
+                }
+            fixture.picker.next = { it - 1 }
+            assertEquals(only.toString(), request(HttpMethod.Get, "/next-game?excludeGameId=$other").nextGame()?.gameId)
+            assertEquals(other.toString(), request(HttpMethod.Get, "/next-game?excludeGameId=$only").nextGame()?.gameId)
+            assertEquals(other.toString(), request(HttpMethod.Get, "/next-game?excludeGameId=$playing").nextGame()?.gameId)
+            assertEquals(other.toString(), request(HttpMethod.Get, "/next-game?excludeGameId=${UUID.randomUUID()}").nextGame()?.gameId)
+            // A single matching candidate stays selectable even when it was the previous draw.
+            assertEquals(
+                only.toString(),
+                request(HttpMethod.Get, "/next-game?platformId=$platform&excludeGameId=$only").nextGame()?.gameId,
+            )
+            assertEquals(listOf(1, 1, 2, 2, 1), fixture.picker.bounds)
+
+            assertEquals("""{"entry":null}""", request(HttpMethod.Get, "/next-game", subject = second).bodyAsText())
+            assertEquals(
+                """{"entry":null}""",
+                request(HttpMethod.Get, "/next-game?excludeGameId=$only", subject = second).bodyAsText(),
+            )
+            for (query in listOf("platformId=x", "excludeGameId=x", "platformId=", "excludeGameId=$only-0")) {
+                assertEquals(HttpStatusCode.BadRequest, request(HttpMethod.Get, "/next-game?$query").status, query)
+            }
+            assertEquals(HttpStatusCode.Unauthorized, request(HttpMethod.Get, "/next-game", subject = null).status)
+            assertEquals(5, fixture.picker.bounds.size)
+        }
+
+    private class Picker {
+        val bounds = mutableListOf<Int>()
+        var next: (Int) -> Int = { 0 }
+
+        fun pick(bound: Int) = next(bound).also { bounds += bound }
+    }
+
     private data class Fixture(
         val database: UserApiTestDatabase,
         val catalog: CatalogStub,
+        val picker: Picker,
     )
 
     private fun withLibrary(block: suspend ApplicationTestBuilder.(Fixture) -> Unit) {
         UserApiTestDatabase.start().use { database ->
             CatalogStub().use { catalog ->
+                val picker = Picker()
                 testApplication {
                     val users = JdbcUserStore(database.dataSource)
                     application {
@@ -663,10 +773,10 @@ class LibraryHttpTest {
                             auth,
                             users,
                             auth.verifier(tokens.provider),
-                            LibraryService(JdbcLibraryStore(database.dataSource), HttpCatalogClient(catalog.config())),
+                            LibraryService(JdbcLibraryStore(database.dataSource), HttpCatalogClient(catalog.config()), picker::pick),
                         )
                     }
-                    block(Fixture(database, catalog))
+                    block(Fixture(database, catalog, picker))
                 }
             }
         }
@@ -694,6 +804,51 @@ class LibraryHttpTest {
             }
 
     private suspend fun HttpResponse.entry() = Json.decodeFromString<LibraryEntry>(bodyAsText())
+
+    private suspend fun HttpResponse.nextGame(): LibraryEntry? {
+        assertEquals(HttpStatusCode.OK, status)
+        return Json.decodeFromString<NextGame>(bodyAsText()).entry
+    }
+
+    /** Inserts an entry created [minute] minutes after a fixed base time and returns its game ID. */
+    private fun Connection.insertEntry(
+        userId: UUID,
+        status: String,
+        platformId: UUID,
+        minute: Int,
+    ): UUID {
+        val entry = UUID.randomUUID()
+        val game = UUID.randomUUID()
+        execute(
+            "INSERT INTO user_data.library_entries(id,user_id,game_id,platform_id,ownership,snapshot_title,created_at) VALUES (?,?,?,?,'owned','Game',?)",
+            entry,
+            userId,
+            game,
+            platformId,
+            Timestamp.from(Instant.parse("2026-01-01T00:00:00Z").plusSeconds(minute * 60L)),
+        )
+        execute("INSERT INTO user_data.game_statuses(library_entry_id,status) VALUES (?,?)", entry, status)
+        return game
+    }
+
+    private fun Connection.entryId(gameId: UUID) =
+        prepareStatement("SELECT id FROM user_data.library_entries WHERE game_id=?").use { query ->
+            query.setObject(1, gameId)
+            query.executeQuery().use { rows ->
+                assertTrue(rows.next())
+                rows.getObject(1, UUID::class.java)
+            }
+        }
+
+    /** All personal rows, to prove that reads leave every table unchanged. */
+    private fun Connection.state() =
+        listOf("library_entries", "game_statuses", "favorites", "ratings", "notes").associateWith { table ->
+            createStatement().use { query ->
+                query.executeQuery("SELECT * FROM user_data.$table ORDER BY 1").use { rows ->
+                    buildList { while (rows.next()) add((1..rows.metaData.columnCount).map(rows::getString)) }
+                }
+            }
+        }
 
     private fun Connection.execute(
         sql: String,

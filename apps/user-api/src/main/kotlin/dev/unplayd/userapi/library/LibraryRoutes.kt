@@ -14,21 +14,30 @@ import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
+import io.ktor.server.routing.route
 
+/** Registers all personal library resources; each resource lives in its own `*Routes.kt` file. */
 fun Route.libraryRoutes(
     users: UserStore,
     service: LibraryService,
 ) {
-    suspend fun ApplicationCall.userId() = users.resolve(requireNotNull(principal<JWTPrincipal>()).subject!!).id
+    libraryEntryRoutes(users, service)
+    nextGameRoutes(users, service)
+    favoriteRoutes(users, service)
+    ratingRoutes(users, service)
+    noteRoutes(users, service)
+}
 
-    get("/library/overview") { call.respond(service.overview(call.userId())) }
-    get("/library/platforms") { call.respond(service.platforms(call.userId())) }
-    get("/library/{gameId}") {
-        val gameId = uuid(call.parameters["gameId"])
-        val entry = service.findEntry(call.userId(), gameId) ?: throw LibraryProblem(404, "Not found")
-        call.respond(entry)
-    }
-    get("/library") {
+internal suspend fun ApplicationCall.userId(users: UserStore) = users.resolve(requireNotNull(principal<JWTPrincipal>()).subject!!).id
+
+// Validate the path ID before resolving the user, so malformed requests never touch identity storage.
+internal fun ApplicationCall.gameId() = uuid(parameters["gameId"])
+
+private fun Route.libraryEntryRoutes(
+    users: UserStore,
+    service: LibraryService,
+) = route("/library") {
+    get {
         val query = call.request.queryParameters
         val limit = query["limit"]?.let { it.toIntOrNull() ?: throw LibraryProblem(400, "Invalid limit") } ?: 20
         val favorite =
@@ -38,58 +47,36 @@ fun Route.libraryRoutes(
                 else -> throw LibraryProblem(400, "Invalid library filter")
             }
         val filter = LibraryFilter(query["status"], query["ownership"], query["platformId"], favorite, limit, query["cursor"])
-        call.respond(service.list(call.userId(), filter))
+        call.respond(service.list(call.userId(users), filter))
     }
-    post("/library/lookup") {
-        val gameIds = call.receive<LibraryLookupRequest>().ids()
-        call.respond(service.lookup(call.userId(), gameIds))
-    }
-    post("/library") {
+    post {
         val request = call.receive<AddLibraryEntry>()
         request.validate()
-        val result = service.add(call.userId(), request, requireNotNull(call.callId))
+        val result = service.add(call.userId(users), request, requireNotNull(call.callId))
         call.respond(if (result.created) HttpStatusCode.Created else HttpStatusCode.OK, result.entry)
     }
-    put("/library/{gameId}/status") {
-        val gameId = uuid(call.parameters["gameId"])
-        val status = call.receive<SetStatus>().status
-        if (status !in statuses) throw LibraryProblem(400, "Invalid status")
-        call.respond(service.setStatus(call.userId(), gameId, status))
+    get("/overview") { call.respond(service.overview(call.userId(users))) }
+    get("/platforms") { call.respond(service.platforms(call.userId(users))) }
+    post("/lookup") {
+        val gameIds = call.receive<LibraryLookupRequest>().ids()
+        call.respond(service.lookup(call.userId(users), gameIds))
     }
-    delete("/library/{gameId}") {
-        val gameId = uuid(call.parameters["gameId"])
-        service.delete(call.userId(), gameId)
-        call.respond(HttpStatusCode.NoContent)
-    }
-    put("/favorites/{gameId}") {
-        val gameId = uuid(call.parameters["gameId"])
-        call.respond(service.favorite(call.userId(), gameId, requireNotNull(call.callId)))
-    }
-    delete("/favorites/{gameId}") {
-        val gameId = uuid(call.parameters["gameId"])
-        service.unfavorite(call.userId(), gameId)
-        call.respond(HttpStatusCode.NoContent)
-    }
-    put("/ratings/{gameId}") {
-        val gameId = uuid(call.parameters["gameId"])
-        val request = call.receive<SetRating>()
-        request.validate()
-        call.respond(service.rate(call.userId(), gameId, request.value, requireNotNull(call.callId)))
-    }
-    delete("/ratings/{gameId}") {
-        val gameId = uuid(call.parameters["gameId"])
-        service.unrate(call.userId(), gameId)
-        call.respond(HttpStatusCode.NoContent)
-    }
-    put("/notes/{gameId}") {
-        val gameId = uuid(call.parameters["gameId"])
-        val request = call.receive<SetNote>()
-        request.validate()
-        call.respond(service.note(call.userId(), gameId, request.text, requireNotNull(call.callId)))
-    }
-    delete("/notes/{gameId}") {
-        val gameId = uuid(call.parameters["gameId"])
-        service.removeNote(call.userId(), gameId)
-        call.respond(HttpStatusCode.NoContent)
+    route("/{gameId}") {
+        get {
+            val gameId = call.gameId()
+            val entry = service.findEntry(call.userId(users), gameId) ?: throw LibraryProblem(404, "Not found")
+            call.respond(entry)
+        }
+        delete {
+            val gameId = call.gameId()
+            service.delete(call.userId(users), gameId)
+            call.respond(HttpStatusCode.NoContent)
+        }
+        put("/status") {
+            val gameId = call.gameId()
+            val status = call.receive<SetStatus>().status
+            if (status !in statuses) throw LibraryProblem(400, "Invalid status")
+            call.respond(service.setStatus(call.userId(users), gameId, status))
+        }
     }
 }

@@ -38,6 +38,13 @@ internal class TestUsers(
 
             override suspend fun overview(userId: UUID) = error("Not used by identity tests")
 
+            override suspend fun drawBacklog(
+                userId: UUID,
+                platformId: UUID?,
+                excludeGameId: UUID?,
+                pick: (Int) -> Int,
+            ) = error("Not used by identity tests")
+
             override suspend fun platforms(userId: UUID) = error("Not used by identity tests")
 
             override suspend fun add(

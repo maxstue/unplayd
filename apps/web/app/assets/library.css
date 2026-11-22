@@ -42,6 +42,14 @@
   border-radius: 0.6rem;
   background: var(--surface);
 }
+.collection-summary a,
+.collection-panel nav a,
+.pagination a {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  font-weight: 500;
+}
 .collection-summary a {
   min-height: 62px;
   gap: 0.8rem;

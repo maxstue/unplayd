@@ -160,13 +160,13 @@ h3 {
 .brand span {
   color: var(--accent);
 }
-nav {
+.main-nav {
   display: flex;
   align-items: center;
   flex: 1;
   gap: 1.75rem;
 }
-nav a {
+.main-nav a {
   display: flex;
   align-items: center;
   min-height: 72px;
@@ -181,8 +181,8 @@ nav a {
   width: 1.375rem;
   height: 1.375rem;
 }
-nav a[aria-current="page"],
-nav a.router-link-exact-active {
+.main-nav a[aria-current="page"],
+.main-nav a.router-link-exact-active {
   color: var(--foreground);
   border-color: var(--accent);
 }
@@ -626,13 +626,13 @@ output {
   .brand {
     flex: 1;
   }
-  nav {
+  .main-nav {
     order: 3;
     flex-basis: 100%;
     gap: 1rem;
     flex-wrap: wrap;
   }
-  nav a {
+  .main-nav a {
     min-height: 48px;
     font-size: 0.8125rem;
   }

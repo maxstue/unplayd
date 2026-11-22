@@ -20,8 +20,8 @@ function entry(title = "Hades"): LibraryEntryView {
     catalogStatus: "available",
   };
 }
-function drawn(value: LibraryEntryView | null, catalogUnavailable = false): NextGameView {
-  return { entry: value, catalogUnavailable };
+function drawn(value: LibraryEntryView | null): NextGameView {
+  return { entry: value };
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -86,14 +86,6 @@ it("distinguishes an empty backlog from a pending first draw", async () => {
   await flow.draw();
   expect(flow.drawn.value).toBe(true);
   expect(flow.entry.value).toBeNull();
-});
-
-it("keeps the catalog outage flag with the drawn snapshot", async () => {
-  const { flow, transport } = setup();
-  transport.draw.mockResolvedValue(drawn({ ...entry(), catalogStatus: "unavailable" }, true));
-  await flow.draw();
-  expect(flow.catalogUnavailable.value).toBe(true);
-  expect(flow.entry.value?.display.title).toBe("Hades");
 });
 
 it("starts only explicitly and does not exclude a started game on the next draw", async () => {

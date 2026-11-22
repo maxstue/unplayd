@@ -1,21 +1,15 @@
 <script setup lang="ts">
-import { ownershipLabels, platformLabel, type NextGameView } from "#shared/library";
+import { libraryFilters, ownershipLabels, platformLabel, type NextGameView } from "#shared/library";
 definePageMeta({ middleware: "auth" });
 useHead({ title: "Nächstes Spiel · Unplayd" });
 const route = useRoute();
 const router = useRouter();
-const platformId = computed(() =>
-  typeof route.query.platformId === "string" &&
-  /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(route.query.platformId)
-    ? route.query.platformId
-    : undefined,
-);
+const platformId = computed(() => libraryFilters(route.query).platformId);
 const {
   entry,
   drawn,
   drawing,
   failed,
-  catalogUnavailable,
   onlyCandidate,
   reveal,
   starting,
@@ -33,7 +27,6 @@ const {
   error: platformsError,
   refresh: refreshPlatforms,
 } = useLazyFetch("/api/library/platforms");
-const result = ref<HTMLElement | null>(null);
 const announcement = computed(() => {
   if (drawing.value) {
     return "Spiel wird gezogen …";
@@ -52,11 +45,6 @@ const announcement = computed(() => {
     ? `${title} ist das einzige passende Spiel in deinem Backlog.`
     : `${title} gezogen.`;
 });
-async function drawAndFocus() {
-  await draw();
-  await nextTick();
-  result.value?.focus({ preventScroll: true });
-}
 function selectPlatform(value: string) {
   return router.replace({ path: "/next-game", query: { platformId: value || undefined } });
 }
@@ -90,7 +78,7 @@ function selectPlatform(value: string) {
           </option>
         </select>
       </div>
-      <button type="button" class="draw-button" :aria-busy="drawing" @click="drawAndFocus()">
+      <button type="button" class="draw-button" @click="draw()">
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -127,13 +115,13 @@ function selectPlatform(value: string) {
 
       <div v-if="failed" role="alert" class="state-message">
         <p>Es konnte gerade kein Spiel gezogen werden.</p>
-        <button type="button" @click="drawAndFocus()">Erneut versuchen</button>
+        <button type="button" @click="draw()">Erneut versuchen</button>
       </div>
       <p v-else-if="!drawn && !drawing" class="state-message">
         Ziehe eine Karte. Du kannst so oft neu ziehen, wie du möchtest.
       </p>
 
-      <div v-if="drawn && !entry" ref="result" tabindex="-1" class="state-message next-game-empty">
+      <div v-if="drawn && !entry" class="state-message next-game-empty">
         <h2>
           {{ platformId ? "Kein Backlog-Spiel für diese Plattform" : "Dein Backlog ist leer" }}
         </h2>
@@ -153,8 +141,6 @@ function selectPlatform(value: string) {
       <article
         v-else-if="entry"
         :key="reveal"
-        ref="result"
-        tabindex="-1"
         class="next-game-card"
         :aria-busy="drawing || starting"
         aria-labelledby="next-game-title"
@@ -164,7 +150,7 @@ function selectPlatform(value: string) {
           <p class="next-game-eyebrow">{{ started ? "Jetzt aktiv" : "Dein nächstes Spiel" }}</p>
           <h2 id="next-game-title">{{ entry.display.title }}</h2>
           <p class="muted">{{ ownershipLabels[entry.ownership] }} · {{ platformLabel(entry) }}</p>
-          <p v-if="catalogUnavailable" class="catalog-note">
+          <p v-if="entry.catalogStatus === 'unavailable'" class="catalog-note">
             Katalog nicht erreichbar. Gespeicherte Spieldaten werden angezeigt.
           </p>
           <p v-else-if="entry.catalogStatus !== 'available'" class="catalog-note">

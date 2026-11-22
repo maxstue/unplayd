@@ -239,7 +239,9 @@ test("drawing the next game never changes state until the game is explicitly sta
   await page.getByRole("button", { name: "Spiel ziehen" }).click();
   const card = page.getByRole("article", { name: "Hollow Knight" });
   await expect(card).toBeVisible();
-  await expect(card).toBeFocused();
+  await expect(
+    page.getByRole("status").filter({ hasText: "„Hollow Knight“ gezogen." }),
+  ).toBeAttached();
   expect(await knightState()).toMatchObject({ status: "backlog", favorite: false, rating: null });
 
   await page.getByRole("button", { name: "Neu ziehen" }).click();

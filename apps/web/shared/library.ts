@@ -37,10 +37,12 @@ export interface LibraryPageView {
   nextCursor: string | null;
   catalogUnavailable: boolean;
 }
-/** A random backlog draw; `entry` is `null` when no backlog entry matches the filter. */
+/**
+ * A random backlog draw; `entry` is `null` when no backlog entry matches the filter. A catalog
+ * outage shows as `entry.catalogStatus === "unavailable"`.
+ */
 export interface NextGameView {
   entry: LibraryEntryView | null;
-  catalogUnavailable: boolean;
 }
 export interface LibraryOverview {
   total: number;

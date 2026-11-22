@@ -924,7 +924,6 @@ it("draws the next game read-only from Ktor and enriches it with one catalog bat
       display: { title: "Current catalog title" },
       catalogStatus: "available",
     },
-    catalogUnavailable: false,
   });
   const [draw, batchRequest] = requests();
   const url = new URL(draw!.url);
@@ -941,7 +940,7 @@ it("returns the empty draw without a catalog request", async () => {
   fetcher.mockResolvedValueOnce(Response.json({ entry: null }));
   const response = await send("/api/next-game");
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ entry: null, catalogUnavailable: false });
+  expect(await response.json()).toEqual({ entry: null });
   expect(fetcher).toHaveBeenCalledOnce();
 });
 
@@ -953,7 +952,6 @@ it("keeps the drawn snapshot when the catalog fails", async () => {
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({
     entry: { gameId: first.gameId, display: first.snapshot, catalogStatus: "unavailable" },
-    catalogUnavailable: true,
   });
 });
 

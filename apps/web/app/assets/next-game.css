@@ -91,12 +91,6 @@
   animation: reveal-card 0.55s cubic-bezier(0.2, 0.8, 0.2, 1.15);
   transform-origin: 50% 80%;
 }
-.next-game-card:focus {
-  outline: none;
-}
-.next-game-card:focus-visible {
-  outline: 2px solid var(--accent);
-}
 .next-game-card[aria-busy="true"] {
   opacity: 0.75;
 }
@@ -129,9 +123,6 @@
   flex-wrap: wrap;
   gap: 0.75rem;
   padding-top: 0.5rem;
-}
-.next-game-empty:focus {
-  outline: none;
 }
 .next-game-empty h2 {
   color: var(--foreground);

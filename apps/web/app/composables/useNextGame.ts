@@ -25,7 +25,6 @@ export function useNextGame(platformId: Ref<string | undefined>, transport: Next
   const drawn = ref(false);
   const drawing = ref(false);
   const failed = ref(false);
-  const catalogUnavailable = ref(false);
   const onlyCandidate = ref(false);
   /** Increments for every newly revealed game to restart the reveal animation. */
   const reveal = ref(0);
@@ -43,7 +42,6 @@ export function useNextGame(platformId: Ref<string | undefined>, transport: Next
     drawn.value = false;
     drawing.value = false;
     failed.value = false;
-    catalogUnavailable.value = false;
     onlyCandidate.value = false;
     started.value = false;
     startError.value = "";
@@ -77,7 +75,6 @@ export function useNextGame(platformId: Ref<string | undefined>, transport: Next
       }
       onlyCandidate.value = !!excludeGameId && result.entry?.gameId === excludeGameId;
       entry.value = result.entry;
-      catalogUnavailable.value = result.catalogUnavailable;
       started.value = false;
       drawn.value = true;
       reveal.value++;
@@ -123,7 +120,6 @@ export function useNextGame(platformId: Ref<string | undefined>, transport: Next
     drawn,
     drawing,
     failed,
-    catalogUnavailable,
     onlyCandidate,
     reveal,
     starting,

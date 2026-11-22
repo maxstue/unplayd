@@ -275,12 +275,12 @@ export function getLibraryOverview(event: H3Event, config: ServicesConfig, fetch
 }
 /**
  * Draws a random backlog game from the user service (read-only) and enriches it with catalog data
- * via {@link enrichEntries}. A catalog failure keeps the stored snapshot.
+ * via {@link enrichEntries}. A catalog failure keeps the stored snapshot (`catalogStatus: "unavailable"`).
  *
  * @param event - The incoming {@link H3Event}.
  * @param config - Runtime {@link ServicesConfig} for the upstream services.
  * @param fetcher - Optional `fetch` override, used in tests.
- * @returns The drawn entry (`null` when no backlog entry matches) and `catalogUnavailable`.
+ * @returns The drawn entry, `null` when no backlog entry matches.
  */
 export function drawNextGame(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
   return withServices(
@@ -294,13 +294,12 @@ export function drawNextGame(event: H3Event, config: ServicesConfig, fetcher?: t
         })
       ).data;
       if (entry === null) {
-        return { entry: null, catalogUnavailable: false };
+        return { entry: null };
       }
       if (!entry || typeof entry !== "object" || entry.status !== "backlog") {
         throw publicError(503, s.requestId);
       }
-      const { items, catalogUnavailable } = await enrichEntries([entry], s);
-      return { entry: items[0]!, catalogUnavailable };
+      return { entry: (await enrichEntries([entry], s)).items[0]! };
     },
     fetcher,
   );

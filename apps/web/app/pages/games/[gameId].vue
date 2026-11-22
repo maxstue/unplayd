@@ -8,6 +8,9 @@ const backLabel = computed(() => {
   if (!returnTo.value) {
     return "Zurück zur Suche";
   }
+  if (returnTo.value.startsWith("/next-game")) {
+    return "Zurück zur Spielauswahl";
+  }
   return returnTo.value.startsWith("/library") ? "Zurück zur Bibliothek" : "Zurück zum Dashboard";
 });
 const id = route.params.gameId as string;

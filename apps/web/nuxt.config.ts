@@ -1,11 +1,13 @@
 export default defineNuxtConfig({
   compatibilityDate: "2026-10-15",
   telemetry: false,
-  css: ["~/assets/main.css", "~/assets/library.css"],
+  css: ["~/assets/main.css", "~/assets/library.css", "~/assets/next-game.css"],
   app: {
     head: {
       title: "Unplayd",
       htmlAttrs: { lang: "de" },
+      // Lets the mobile tab bar respect the home indicator via safe-area insets.
+      viewport: "width=device-width, initial-scale=1, viewport-fit=cover",
       link: [{ rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
     },
   },
@@ -31,6 +33,7 @@ export default defineNuxtConfig({
     "/": { headers: { "Cache-Control": "no-store" } },
     "/dashboard/**": { headers: { "Cache-Control": "no-store" } },
     "/library/**": { headers: { "Cache-Control": "no-store" } },
+    "/next-game/**": { headers: { "Cache-Control": "no-store" } },
     "/games/**": { headers: { "Cache-Control": "no-store" } },
     "/sign-in/**": { headers: { "Cache-Control": "no-store" } },
     "/sign-up/**": { headers: { "Cache-Control": "no-store" } },

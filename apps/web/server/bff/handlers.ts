@@ -15,6 +15,7 @@ import {
   catalogQuery,
   gameId,
   libraryQuery,
+  nextGameQuery,
   noteBody,
   ratingBody,
   statusBody,
@@ -268,6 +269,38 @@ export function getLibraryOverview(event: H3Event, config: ServicesConfig, fetch
           signal: s.signal,
         })
       ).data;
+    },
+    fetcher,
+  );
+}
+/**
+ * Draws a random backlog game from the user service (read-only) and enriches it with catalog data
+ * via {@link enrichEntries}. A catalog failure keeps the stored snapshot.
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @param config - Runtime {@link ServicesConfig} for the upstream services.
+ * @param fetcher - Optional `fetch` override, used in tests.
+ * @returns The drawn entry (`null` when no backlog entry matches) and `catalogUnavailable`.
+ */
+export function drawNextGame(event: H3Event, config: ServicesConfig, fetcher?: typeof fetch) {
+  return withServices(
+    event,
+    config,
+    async (s) => {
+      const query = nextGameQuery(event);
+      const { entry } = (
+        await upstream(() => s.user.GET("/next-game", { params: { query } }), "user", s.requestId, {
+          signal: s.signal,
+        })
+      ).data;
+      if (entry === null) {
+        return { entry: null, catalogUnavailable: false };
+      }
+      if (!entry || typeof entry !== "object" || entry.status !== "backlog") {
+        throw publicError(503, s.requestId);
+      }
+      const { items, catalogUnavailable } = await enrichEntries([entry], s);
+      return { entry: items[0]!, catalogUnavailable };
     },
     fetcher,
   );

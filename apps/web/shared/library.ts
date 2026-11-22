@@ -37,6 +37,11 @@ export interface LibraryPageView {
   nextCursor: string | null;
   catalogUnavailable: boolean;
 }
+/** A random backlog draw; `entry` is `null` when no backlog entry matches the filter. */
+export interface NextGameView {
+  entry: LibraryEntryView | null;
+  catalogUnavailable: boolean;
+}
 export interface LibraryOverview {
   total: number;
   statuses: Record<PlayStatus, number>;
@@ -69,13 +74,15 @@ export function libraryFilters(query: Record<string, unknown>): LibraryFilters {
   };
 }
 /**
- * Accepts only internal library or dashboard paths as a return target, preventing open redirects.
+ * Accepts only internal library, dashboard or next-game paths as a return target, preventing open redirects.
  *
  * @param value - Untrusted return path, e.g. from a query parameter.
  * @returns The path, or `null` if it is not allowed.
  */
 export function libraryReturnPath(value: unknown) {
-  return typeof value === "string" && /^\/(library|dashboard)(\?|$)/.test(value) ? value : null;
+  return typeof value === "string" && /^\/(library|dashboard|next-game)(\?|$)/.test(value)
+    ? value
+    : null;
 }
 /**
  * Returns the display name of an entry's platform.

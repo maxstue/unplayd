@@ -42,6 +42,7 @@ function entry(gameId: string): Entry {
 let libraries: Record<string, Entry[]>;
 let failLibrary = false;
 let failDelete = false;
+let failCatalog = false;
 let holdStatus = false;
 let releaseStatus: (() => void) | undefined;
 function reset() {
@@ -50,6 +51,7 @@ function reset() {
   libraries = { alice: [entry(knight)], bob: [entry(celeste)] };
   failLibrary = false;
   failDelete = false;
+  failCatalog = false;
   holdStatus = false;
 }
 reset();
@@ -83,6 +85,9 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     if (typeof config.failDelete === "boolean") {
       failDelete = config.failDelete;
     }
+    if (typeof config.failCatalog === "boolean") {
+      failCatalog = config.failCatalog;
+    }
     if (typeof config.holdStatus === "boolean") {
       holdStatus = config.holdStatus;
     }
@@ -102,6 +107,9 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
       return json(response, {}, 401);
     }
     const path = url.pathname;
+    if (failCatalog) {
+      return json(response, {}, 503);
+    }
     if (path === "/games/batch") {
       const { gameIds } = await body(request);
       return json(response, {
@@ -156,6 +164,19 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
           (!url.searchParams.has("favorite") || item.favorite),
       ),
       nextCursor: null,
+    });
+  }
+  if (path === "/next-game") {
+    // Deterministic: the first matching backlog entry that is not excluded, else the excluded one.
+    const candidates = entries.filter(
+      (item) =>
+        item.status === "backlog" &&
+        (!url.searchParams.has("platformId") ||
+          item.platformId === url.searchParams.get("platformId")),
+    );
+    const excluded = url.searchParams.get("excludeGameId");
+    return json(response, {
+      entry: candidates.find((item) => item.gameId !== excluded) ?? candidates[0] ?? null,
     });
   }
   if (path === "/library/lookup") {

@@ -269,6 +269,7 @@ it("validates URL filters and permits only local library return destinations", (
   const path = `/library?status=playing&platformId=${platformId}&cursor=opaque%2B%2F%3D`;
   expect(libraryReturnPath(path)).toBe(path);
   expect(libraryReturnPath("/dashboard")).toBe("/dashboard");
+  expect(libraryReturnPath("/next-game?platformId=x")).toBe("/next-game?platformId=x");
   for (const value of [
     "//foreign.example",
     "https://foreign.example",

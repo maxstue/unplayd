@@ -74,6 +74,20 @@ export function libraryQuery(event: H3Event) {
   };
 }
 /**
+ * Validates the next-game query (`platformId`, `excludeGameId`).
+ *
+ * @param event - The incoming {@link H3Event}.
+ * @returns The validated query; absent parameters stay `undefined`.
+ * @throws {@link InvalidInput} for an invalid UUID.
+ */
+export function nextGameQuery(event: H3Event) {
+  const q = getQuery(event);
+  return {
+    platformId: q.platformId === undefined ? undefined : uuid(q.platformId),
+    excludeGameId: q.excludeGameId === undefined ? undefined : uuid(q.excludeGameId),
+  };
+}
+/**
  * Validates the catalog search query (`query`, `platformId`, `limit`, `cursor`, repeated `kind`).
  *
  * @param event - The incoming {@link H3Event}.

@@ -55,7 +55,6 @@ it("draws without changing state and excludes the previous game on a redraw", as
     platformId: "20000000-0000-4000-8000-000000000001",
   });
   expect(flow.entry.value).toEqual(first);
-  expect(flow.reveal.value).toBe(1);
   await flow.draw();
   expect(transport.draw.mock.calls[1]![0]).toEqual({
     platformId: "20000000-0000-4000-8000-000000000001",
@@ -63,7 +62,6 @@ it("draws without changing state and excludes the previous game on a redraw", as
   });
   expect(flow.entry.value).toEqual(second);
   expect(flow.onlyCandidate.value).toBe(false);
-  expect(flow.reveal.value).toBe(2);
   expect(transport.start).not.toHaveBeenCalled();
 });
 
@@ -82,9 +80,8 @@ it("reports a single candidate when the redraw returns the excluded game", async
 it("distinguishes an empty backlog from a pending first draw", async () => {
   const { flow, transport } = setup();
   transport.draw.mockResolvedValue(drawn(null));
-  expect(flow.drawn.value).toBe(false);
+  expect(flow.entry.value).toBeUndefined();
   await flow.draw();
-  expect(flow.drawn.value).toBe(true);
   expect(flow.entry.value).toBeNull();
 });
 
@@ -93,11 +90,11 @@ it("starts only explicitly and does not exclude a started game on the next draw"
   const first = entry();
   transport.draw.mockResolvedValueOnce(drawn(first)).mockResolvedValueOnce(drawn(null));
   await flow.draw();
-  expect(await flow.start()).toBe(true);
+  await flow.start();
   expect(transport.start).toHaveBeenCalledExactlyOnceWith(first.gameId);
   expect(flow.started.value).toBe(true);
   expect(flow.entry.value?.status).toBe("playing");
-  expect(await flow.start()).toBe(false);
+  await flow.start();
   expect(transport.start).toHaveBeenCalledOnce();
   await flow.draw();
   expect(transport.draw.mock.calls[1]![0]).toEqual({});
@@ -109,10 +106,12 @@ it("keeps the drawn game after a failed start and allows a retry", async () => {
   transport.draw.mockResolvedValue(drawn(entry()));
   transport.start.mockRejectedValueOnce(new Error("offline"));
   await flow.draw();
-  expect(await flow.start()).toBe(false);
+  await flow.start();
   expect(flow.startError.value).not.toBe("");
+  expect(flow.started.value).toBe(false);
   expect(flow.entry.value?.status).toBe("backlog");
-  expect(await flow.start()).toBe(true);
+  await flow.start();
+  expect(flow.started.value).toBe(true);
   expect(flow.startError.value).toBe("");
 });
 
@@ -134,7 +133,20 @@ it("ignores stale draws, keeps the last game on failure and resets on a platform
   expect(flow.entry.value).toEqual(kept);
   platformId.value = "20000000-0000-4000-8000-000000000001";
   await nextTick();
-  expect(flow.entry.value).toBeNull();
-  expect(flow.drawn.value).toBe(false);
+  expect(flow.entry.value).toBeUndefined();
   expect(flow.failed.value).toBe(false);
+});
+
+it("does not redraw while the drawn game is being started", async () => {
+  const { flow, transport } = setup();
+  transport.draw.mockResolvedValue(drawn(entry()));
+  const pending = deferred<unknown>();
+  transport.start.mockReturnValueOnce(pending.promise);
+  await flow.draw();
+  const starting = flow.start();
+  await flow.draw();
+  expect(transport.draw).toHaveBeenCalledOnce();
+  pending.resolve({});
+  await starting;
+  expect(flow.started.value).toBe(true);
 });

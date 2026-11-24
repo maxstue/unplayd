@@ -1,4 +1,4 @@
-import { onScopeDispose, ref, watch, type Ref } from "vue";
+import { computed, onScopeDispose, ref, watch, type Ref } from "vue";
 import type { LibraryEntryView, NextGameView } from "#shared/library";
 
 export interface NextGameTransport {
@@ -20,40 +20,40 @@ export interface NextGameTransport {
  * @returns Reactive draw state plus `draw` and `start`.
  */
 export function useNextGame(platformId: Ref<string | undefined>, transport: NextGameTransport) {
-  const entry = ref<LibraryEntryView | null>(null);
-  /** `true` once a draw has completed, so `entry === null` means an empty backlog. */
-  const drawn = ref(false);
+  /** `undefined` before the first draw, `null` when no backlog game matches. */
+  const entry = ref<LibraryEntryView | null>();
   const drawing = ref(false);
   const failed = ref(false);
   const onlyCandidate = ref(false);
-  /** Increments for every newly revealed game to restart the reveal animation. */
-  const reveal = ref(0);
   const starting = ref(false);
-  const started = ref(false);
+  /** Drawn games are always `backlog`; only a successful {@link start} sets `playing`. */
+  const started = computed(() => entry.value?.status === "playing");
   const startError = ref("");
   let controller: AbortController | undefined;
   let generation = 0;
-  let disposed = false;
 
-  function clear() {
+  function cancel() {
     generation++;
     controller?.abort();
-    entry.value = null;
-    drawn.value = false;
-    drawing.value = false;
-    failed.value = false;
-    onlyCandidate.value = false;
-    started.value = false;
-    startError.value = "";
   }
-  watch(platformId, clear, { flush: "sync" });
-  onScopeDispose(() => {
-    disposed = true;
-    generation++;
-    controller?.abort();
-  });
+  watch(
+    platformId,
+    () => {
+      cancel();
+      entry.value = undefined;
+      drawing.value = false;
+      failed.value = false;
+      onlyCandidate.value = false;
+      startError.value = "";
+    },
+    { flush: "sync" },
+  );
+  onScopeDispose(cancel);
 
   async function draw() {
+    if (starting.value) {
+      return;
+    }
     controller?.abort();
     const current = ++generation;
     controller = new AbortController();
@@ -70,20 +70,17 @@ export function useNextGame(platformId: Ref<string | undefined>, transport: Next
         },
         controller.signal,
       );
-      if (current !== generation || disposed) {
+      if (current !== generation) {
         return;
       }
       onlyCandidate.value = !!excludeGameId && result.entry?.gameId === excludeGameId;
       entry.value = result.entry;
-      started.value = false;
-      drawn.value = true;
-      reveal.value++;
     } catch {
-      if (current === generation && !disposed) {
+      if (current === generation) {
         failed.value = true;
       }
     } finally {
-      if (current === generation && !disposed) {
+      if (current === generation) {
         drawing.value = false;
       }
     }
@@ -92,40 +89,25 @@ export function useNextGame(platformId: Ref<string | undefined>, transport: Next
   async function start() {
     const target = entry.value;
     if (!target || starting.value || started.value || drawing.value) {
-      return false;
+      return;
     }
     const current = generation;
     starting.value = true;
     startError.value = "";
     try {
       await transport.start(target.gameId);
-      if (current === generation && !disposed) {
+      if (current === generation) {
         entry.value = { ...target, status: "playing" };
-        started.value = true;
         onlyCandidate.value = false;
       }
-      return true;
     } catch {
-      if (current === generation && !disposed) {
+      if (current === generation) {
         startError.value = "Der Status konnte nicht gespeichert werden. Bitte versuche es erneut.";
       }
-      return false;
     } finally {
       starting.value = false;
     }
   }
 
-  return {
-    entry,
-    drawn,
-    drawing,
-    failed,
-    onlyCandidate,
-    reveal,
-    starting,
-    started,
-    startError,
-    draw,
-    start,
-  };
+  return { entry, drawing, failed, onlyCandidate, starting, started, startError, draw, start };
 }

@@ -246,13 +246,14 @@ test("drawing the next game never changes state until the game is explicitly sta
 
   await page.getByRole("button", { name: "Neu ziehen" }).click();
   await expect(
-    page.getByText("Das ist das einzige passende Spiel in deinem Backlog."),
+    card.getByText("Das ist das einzige passende Spiel in deinem Backlog."),
   ).toBeVisible();
   expect((await knightState()).status).toBe("backlog");
 
   await page.getByRole("button", { name: "Jetzt spielen" }).click();
+  await expect(page.getByRole("link", { name: "Zum Dashboard" })).toBeFocused();
   await expect(
-    page.getByText("Viel Spaß! Das Spiel steht jetzt auf „Spiele ich gerade“."),
+    card.getByText("Viel Spaß! Das Spiel steht jetzt auf „Spiele ich gerade“."),
   ).toBeVisible();
   expect((await knightState()).status).toBe("playing");
 
@@ -262,6 +263,7 @@ test("drawing the next game never changes state until the game is explicitly sta
   ).toBeVisible();
   await page.getByRole("button", { name: "Alle Plattformen" }).click();
   await expect(page).toHaveURL(/\/next-game$/);
+  await expect(page.getByRole("button", { name: "Spiel ziehen" })).toBeFocused();
   await page.getByRole("button", { name: "Spiel ziehen" }).click();
   await expect(page.getByRole("heading", { name: "Dein Backlog ist leer" })).toBeVisible();
   await page.goto("/dashboard");
@@ -283,4 +285,24 @@ test("a catalog outage still draws from stored data without motion when reduced"
     page.getByText("Katalog nicht erreichbar. Gespeicherte Spieldaten werden angezeigt."),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Jetzt spielen" })).toBeEnabled();
+});
+
+test("a failed draw keeps keyboard focus and does not announce the previous game", async ({
+  page,
+}) => {
+  await page.goto("/next-game");
+  await page.getByRole("button", { name: "Spiel ziehen" }).click();
+  const status = page.getByRole("status");
+  await expect(status).toHaveText("„Hollow Knight“ gezogen.");
+  const nextGameApi = (url: URL) => url.pathname === "/api/next-game";
+  await page.route(nextGameApi, (route) => route.fulfill({ status: 503 }));
+  await page.getByRole("button", { name: "Neu ziehen" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Es konnte gerade kein Spiel gezogen werden.",
+  );
+  await expect(status).toHaveText("");
+  await page.unroute(nextGameApi);
+  await page.getByRole("button", { name: "Erneut versuchen" }).click();
+  await expect(page.getByRole("button", { name: "Neu ziehen" })).toBeFocused();
+  await expect(status).toContainText("„Hollow Knight“");
 });

@@ -1,52 +1,76 @@
 <script setup lang="ts">
+import type { ComponentPublicInstance } from "vue";
 import { libraryFilters, ownershipLabels, platformLabel, type NextGameView } from "#shared/library";
 definePageMeta({ middleware: "auth" });
 useHead({ title: "Nächstes Spiel · Unplayd" });
 const route = useRoute();
 const router = useRouter();
 const platformId = computed(() => libraryFilters(route.query).platformId);
-const {
-  entry,
-  drawn,
-  drawing,
-  failed,
-  onlyCandidate,
-  reveal,
-  starting,
-  started,
-  startError,
-  draw,
-  start,
-} = useNextGame(platformId, {
-  draw: (query, signal) => $fetch<NextGameView>("/api/next-game", { query, signal }),
-  start: (id) =>
-    $fetch(`/api/library/${id}/status`, { method: "PUT", body: { status: "playing" } }),
-});
+const { entry, drawing, failed, onlyCandidate, starting, started, startError, draw, start } =
+  useNextGame(platformId, {
+    draw: (query, signal) => $fetch<NextGameView>("/api/next-game", { query, signal }),
+    start: (id) =>
+      $fetch(`/api/library/${id}/status`, { method: "PUT", body: { status: "playing" } }),
+  });
 const {
   data: platforms,
   error: platformsError,
   refresh: refreshPlatforms,
 } = useLazyFetch("/api/library/platforms");
+const emptyState = computed(() =>
+  platformId.value
+    ? {
+        title: "Kein Backlog-Spiel für diese Plattform",
+        hint: "Wähle eine andere Plattform oder ziehe aus allen Plattformen.",
+      }
+    : {
+        title: "Dein Backlog ist leer",
+        hint: "Füge Spiele mit dem Status „Backlog“ hinzu, damit hier etwas auf dich wartet.",
+      },
+);
+const onlyCandidateText = "Das ist das einzige passende Spiel in deinem Backlog.";
+const startedText = "Viel Spaß! Das Spiel steht jetzt auf „Spiele ich gerade“.";
 const announcement = computed(() => {
   if (drawing.value) {
     return "Spiel wird gezogen …";
   }
-  if (!drawn.value) {
+  // The error itself is announced by its alert; repeating the previous draw would contradict it.
+  if (failed.value || entry.value === undefined) {
     return "";
   }
   if (!entry.value) {
-    return platformId.value ? "Kein Backlog-Spiel für diese Plattform." : "Dein Backlog ist leer.";
+    return `${emptyState.value.title}.`;
   }
   const title = `„${entry.value.display.title}“`;
   if (started.value) {
-    return `Viel Spaß! ${title} steht jetzt auf „Spiele ich gerade“.`;
+    return `${title}: ${startedText}`;
   }
-  return onlyCandidate.value
-    ? `${title} ist das einzige passende Spiel in deinem Backlog.`
-    : `${title} gezogen.`;
+  return onlyCandidate.value ? `${title}: ${onlyCandidateText}` : `${title} gezogen.`;
 });
 function selectPlatform(value: string) {
   return router.replace({ path: "/next-game", query: { platformId: value || undefined } });
+}
+// These actions remove the clicked button, so focus moves on instead of falling back to <body>.
+const drawButton = useTemplateRef<HTMLButtonElement>("drawButton");
+const startButton = useTemplateRef<HTMLButtonElement>("startButton");
+const dashboardLink = useTemplateRef<ComponentPublicInstance>("dashboardLink");
+function retry() {
+  drawButton.value?.focus();
+  return draw();
+}
+function showAllPlatforms() {
+  drawButton.value?.focus();
+  return selectPlatform("");
+}
+async function startGame() {
+  await start();
+  await nextTick();
+  if (!document.activeElement || document.activeElement === document.body) {
+    (started.value
+      ? (dashboardLink.value?.$el as HTMLElement | undefined)
+      : startButton.value
+    )?.focus();
+  }
 }
 </script>
 
@@ -64,6 +88,7 @@ function selectPlatform(value: string) {
         ><select
           id="next-game-platform"
           :value="platformId ?? ''"
+          :disabled="starting"
           @change="selectPlatform(($event.target as HTMLSelectElement).value)"
         >
           <option value="">Alle Plattformen</option>
@@ -78,7 +103,13 @@ function selectPlatform(value: string) {
           </option>
         </select>
       </div>
-      <button type="button" class="draw-button" @click="draw()">
+      <button
+        ref="drawButton"
+        type="button"
+        class="draw-button"
+        :disabled="starting"
+        @click="draw()"
+      >
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -89,12 +120,9 @@ function selectPlatform(value: string) {
           aria-hidden="true"
         >
           <rect x="4" y="4" width="16" height="16" rx="3" />
-          <circle cx="9" cy="9" r="1" fill="currentColor" />
-          <circle cx="15" cy="15" r="1" fill="currentColor" />
-          <circle cx="15" cy="9" r="1" fill="currentColor" />
-          <circle cx="9" cy="15" r="1" fill="currentColor" />
+          <path d="M9 9h.01M15 9h.01M9 15h.01M15 15h.01" stroke-width="2.5" />
         </svg>
-        {{ drawn && entry ? "Neu ziehen" : "Spiel ziehen" }}
+        {{ entry ? "Neu ziehen" : "Spiel ziehen" }}
       </button>
     </div>
     <div v-if="platformsError" role="alert" class="notice">
@@ -105,7 +133,7 @@ function selectPlatform(value: string) {
     <output class="visually-hidden" aria-live="polite">{{ announcement }}</output>
     <div class="next-game-stage">
       <div
-        v-if="!drawn || (drawing && !entry)"
+        v-if="entry === undefined || (drawing && !entry)"
         class="card-stack"
         :class="{ shuffling: drawing }"
         aria-hidden="true"
@@ -115,24 +143,16 @@ function selectPlatform(value: string) {
 
       <div v-if="failed" role="alert" class="state-message">
         <p>Es konnte gerade kein Spiel gezogen werden.</p>
-        <button type="button" @click="draw()">Erneut versuchen</button>
+        <button type="button" :disabled="starting" @click="retry()">Erneut versuchen</button>
       </div>
-      <p v-else-if="!drawn && !drawing" class="state-message">
+      <p v-else-if="entry === undefined && !drawing" class="state-message">
         Ziehe eine Karte. Du kannst so oft neu ziehen, wie du möchtest.
       </p>
 
-      <div v-if="drawn && !entry" class="state-message next-game-empty">
-        <h2>
-          {{ platformId ? "Kein Backlog-Spiel für diese Plattform" : "Dein Backlog ist leer" }}
-        </h2>
-        <p>
-          {{
-            platformId
-              ? "Wähle eine andere Plattform oder ziehe aus allen Plattformen."
-              : "Füge Spiele mit dem Status „Backlog“ hinzu, damit hier etwas auf dich wartet."
-          }}
-        </p>
-        <button v-if="platformId" type="button" class="secondary" @click="selectPlatform('')">
+      <div v-if="entry === null" class="state-message next-game-empty">
+        <h2>{{ emptyState.title }}</h2>
+        <p>{{ emptyState.hint }}</p>
+        <button v-if="platformId" type="button" class="secondary" @click="showAllPlatforms()">
           Alle Plattformen
         </button>
         <NuxtLink v-else to="/" class="button secondary">Spiele entdecken</NuxtLink>
@@ -140,7 +160,7 @@ function selectPlatform(value: string) {
 
       <article
         v-else-if="entry"
-        :key="reveal"
+        :key="entry.gameId"
         class="next-game-card"
         :aria-busy="drawing || starting"
         aria-labelledby="next-game-title"
@@ -156,18 +176,22 @@ function selectPlatform(value: string) {
           <p v-else-if="entry.catalogStatus !== 'available'" class="catalog-note">
             Im Katalog nicht mehr verfügbar. Gespeicherte Spieldaten werden angezeigt.
           </p>
-          <p v-if="onlyCandidate" class="notice">
-            Das ist das einzige passende Spiel in deinem Backlog.
-          </p>
-          <p v-if="started" class="next-game-success">
-            Viel Spaß! Das Spiel steht jetzt auf „Spiele ich gerade“.
-          </p>
+          <p v-if="onlyCandidate" class="notice">{{ onlyCandidateText }}</p>
+          <p v-if="started" class="next-game-success">{{ startedText }}</p>
           <p v-if="startError" role="alert" class="error-message">{{ startError }}</p>
           <div class="next-game-actions">
-            <button v-if="!started" type="button" :disabled="starting || drawing" @click="start()">
+            <button
+              v-if="!started"
+              ref="startButton"
+              type="button"
+              :disabled="starting || drawing"
+              @click="startGame()"
+            >
               {{ starting ? "Wird gestartet …" : "Jetzt spielen" }}
             </button>
-            <NuxtLink v-else to="/dashboard" class="button">Zum Dashboard</NuxtLink>
+            <NuxtLink v-else ref="dashboardLink" to="/dashboard" class="button"
+              >Zum Dashboard</NuxtLink
+            >
             <NuxtLink
               :to="{
                 path: `/games/${entry.gameId}`,

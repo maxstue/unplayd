@@ -27,6 +27,7 @@ import rate from "../server/api/ratings/[gameId].put";
 import unrate from "../server/api/ratings/[gameId].delete";
 import note from "../server/api/notes/[gameId].put";
 import removeNote from "../server/api/notes/[gameId].delete";
+import nextGame from "../server/api/next-game.get";
 import requestId from "../server/middleware/request-id";
 import { validateServicesConfig } from "../server/clients/config";
 import type { components } from "../server/clients/generated/user-api";
@@ -93,7 +94,8 @@ function app() {
     .put("/api/ratings/:gameId", rate)
     .delete("/api/ratings/:gameId", unrate)
     .put("/api/notes/:gameId", note)
-    .delete("/api/notes/:gameId", removeNote);
+    .delete("/api/notes/:gameId", removeNote)
+    .get("/api/next-game", nextGame);
   return createApp()
     .use(requestId)
     .use(
@@ -900,6 +902,73 @@ it("rejects invalid and signed-out suggestion requests before calling the catalo
         "x-test-session": "none",
       })
     ).status,
+  ).toBe(401);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it("draws the next game read-only from Ktor and enriches it with one catalog batch", async () => {
+  const platformId = randomUUID();
+  fetcher
+    .mockResolvedValueOnce(Response.json({ entry: first }))
+    .mockResolvedValueOnce(
+      Response.json({ items: [game(first.gameId)], missingGameIds: [], inactiveGameIds: [] }),
+    );
+  const response = await send(
+    `/api/next-game?platformId=${platformId.toUpperCase()}&excludeGameId=${second.gameId}`,
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    entry: {
+      gameId: first.gameId,
+      status: "backlog",
+      display: { title: "Current catalog title" },
+      catalogStatus: "available",
+    },
+  });
+  const [draw, batchRequest] = requests();
+  const url = new URL(draw!.url);
+  expect(url.pathname).toBe("/next-game");
+  expect(draw!.method).toBe("GET");
+  expect(url.searchParams.get("platformId")).toBe(platformId);
+  expect(url.searchParams.get("excludeGameId")).toBe(second.gameId);
+  expect(draw!.headers.get("authorization")).toBe(`Bearer ${aliceToken}`);
+  expect(batchRequest!.headers.get("authorization")).toBe(`Bearer ${config.catalogServiceToken}`);
+  expect(requests()).toHaveLength(2);
+});
+
+it("returns the empty draw without a catalog request", async () => {
+  fetcher.mockResolvedValueOnce(Response.json({ entry: null }));
+  const response = await send("/api/next-game");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ entry: null });
+  expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it("keeps the drawn snapshot when the catalog fails", async () => {
+  fetcher
+    .mockResolvedValueOnce(Response.json({ entry: first }))
+    .mockResolvedValueOnce(Response.json({}, { status: 503 }));
+  const response = await send("/api/next-game");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    entry: { gameId: first.gameId, display: first.snapshot, catalogStatus: "unavailable" },
+  });
+});
+
+it.each([[{ entry: { ...first, status: "playing" } }], [{}], [{ entry: "invalid" }]])(
+  "rejects an unexpected next-game response %j",
+  async (body) => {
+    fetcher.mockResolvedValueOnce(Response.json(body));
+    expect((await send("/api/next-game")).status).toBe(503);
+    expect(fetcher).toHaveBeenCalledOnce();
+  },
+);
+
+it("validates next-game parameters and sessions before any upstream request", async () => {
+  expect((await send("/api/next-game?platformId=pc")).status).toBe(400);
+  expect((await send("/api/next-game?excludeGameId=1")).status).toBe(400);
+  expect(
+    (await send("/api/next-game", "GET", undefined, { "X-Test-Session": "none" })).status,
   ).toBe(401);
   expect(fetcher).not.toHaveBeenCalled();
 });

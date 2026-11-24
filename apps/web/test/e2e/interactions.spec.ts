@@ -222,3 +222,87 @@ test("an unsaved note survives the first rating that adds the game", async ({ pa
   );
   await expect(note).toHaveValue("Ungespeicherter Entwurf");
 });
+
+test("drawing the next game never changes state until the game is explicitly started", async ({
+  page,
+  request,
+}) => {
+  const knightState = async () =>
+    (await (await request.get(`${fixture}/state`)).json()).libraries.alice.find(
+      (item: { gameId: string }) => item.gameId === knight,
+    );
+  await page.goto("/dashboard");
+  await page.getByRole("link", { name: "Nächstes Spiel ziehen" }).click();
+  await expect(page).toHaveURL(/\/next-game$/);
+  await page.getByLabel("Plattform").selectOption({ label: "PC" });
+  await expect(page).toHaveURL(/platformId=/);
+  await page.getByRole("button", { name: "Spiel ziehen" }).click();
+  const card = page.getByRole("article", { name: "Hollow Knight" });
+  await expect(card).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "„Hollow Knight“ gezogen." }),
+  ).toBeAttached();
+  expect(await knightState()).toMatchObject({ status: "backlog", favorite: false, rating: null });
+
+  await page.getByRole("button", { name: "Neu ziehen" }).click();
+  await expect(
+    card.getByText("Das ist das einzige passende Spiel in deinem Backlog."),
+  ).toBeVisible();
+  expect((await knightState()).status).toBe("backlog");
+
+  await page.getByRole("button", { name: "Jetzt spielen" }).click();
+  await expect(page.getByRole("link", { name: "Zum Dashboard" })).toBeFocused();
+  await expect(
+    card.getByText("Viel Spaß! Das Spiel steht jetzt auf „Spiele ich gerade“."),
+  ).toBeVisible();
+  expect((await knightState()).status).toBe("playing");
+
+  await page.getByRole("button", { name: "Neu ziehen" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Kein Backlog-Spiel für diese Plattform" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Alle Plattformen" }).click();
+  await expect(page).toHaveURL(/\/next-game$/);
+  await expect(page.getByRole("button", { name: "Spiel ziehen" })).toBeFocused();
+  await page.getByRole("button", { name: "Spiel ziehen" }).click();
+  await expect(page.getByRole("heading", { name: "Dein Backlog ist leer" })).toBeVisible();
+  await page.goto("/dashboard");
+  await expect(page.getByRole("heading", { name: "Hollow Knight", exact: true })).toBeVisible();
+});
+
+test("a catalog outage still draws from stored data without motion when reduced", async ({
+  page,
+  request,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await request.post(`${fixture}/config`, { data: { failCatalog: true } });
+  await page.goto("/next-game");
+  await page.getByRole("button", { name: "Spiel ziehen" }).click();
+  const card = page.getByRole("article", { name: "Hollow Knight" });
+  await expect(card).toBeVisible();
+  await expect(card).toHaveCSS("animation-name", "none");
+  await expect(
+    page.getByText("Katalog nicht erreichbar. Gespeicherte Spieldaten werden angezeigt."),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Jetzt spielen" })).toBeEnabled();
+});
+
+test("a failed draw keeps keyboard focus and does not announce the previous game", async ({
+  page,
+}) => {
+  await page.goto("/next-game");
+  await page.getByRole("button", { name: "Spiel ziehen" }).click();
+  const status = page.getByRole("status");
+  await expect(status).toHaveText("„Hollow Knight“ gezogen.");
+  const nextGameApi = (url: URL) => url.pathname === "/api/next-game";
+  await page.route(nextGameApi, (route) => route.fulfill({ status: 503 }));
+  await page.getByRole("button", { name: "Neu ziehen" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Es konnte gerade kein Spiel gezogen werden.",
+  );
+  await expect(status).toHaveText("");
+  await page.unroute(nextGameApi);
+  await page.getByRole("button", { name: "Erneut versuchen" }).click();
+  await expect(page.getByRole("button", { name: "Neu ziehen" })).toBeFocused();
+  await expect(status).toContainText("„Hollow Knight“");
+});

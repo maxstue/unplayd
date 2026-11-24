@@ -93,9 +93,11 @@ test("built app keeps public HTML, redirects and API errors free of private runt
     "/sign-up",
     "/dashboard",
     "/library",
+    "/next-game",
     "/api/health",
     "/api/me",
     "/api/library",
+    "/api/next-game",
     "/api/games?query=Zelda",
     "/api/library/invalid",
     "/api/games/invalid",
@@ -107,7 +109,7 @@ test("built app keeps public HTML, redirects and API errors free of private runt
     const text = await response.text();
     excludesSecrets(text);
     excludesSecrets(JSON.stringify([...response.headers]));
-    if (path === "/dashboard" || path === "/library") {
+    if (["/dashboard", "/library", "/next-game"].includes(path)) {
       assert.equal(response.status, 302);
       assert.equal(new URL(response.headers.get("location"), baseUrl).pathname, "/sign-in");
     } else if (path.startsWith("/api/") && path !== "/api/health") {

@@ -126,6 +126,16 @@ const summary = computed(() => [
             >Pausiert <span v-if="overview">{{ overview.statuses.paused }}</span></NuxtLink
           ><NuxtLink :to="{ path: '/library', query: { status: 'completed' } }"
             >Abgeschlossen <span v-if="overview">{{ overview.statuses.completed }}</span></NuxtLink
+          ><NuxtLink to="/next-game"
+            >Nächstes Spiel ziehen
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              aria-hidden="true"
+            >
+              <path d="m9 5 7 7-7 7" /></svg></NuxtLink
           ><NuxtLink to="/"
             >Spiele entdecken
             <svg

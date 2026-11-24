@@ -160,13 +160,13 @@ h3 {
 .brand span {
   color: var(--accent);
 }
-nav {
+.main-nav {
   display: flex;
   align-items: center;
   flex: 1;
   gap: 1.75rem;
 }
-nav a {
+.main-nav a {
   display: flex;
   align-items: center;
   min-height: 72px;
@@ -176,8 +176,13 @@ nav a {
   border-bottom: 2px solid transparent;
   color: var(--muted);
 }
-nav a[aria-current="page"],
-nav a.router-link-exact-active {
+.main-nav svg {
+  display: none;
+  width: 1.375rem;
+  height: 1.375rem;
+}
+.main-nav a[aria-current="page"],
+.main-nav a.router-link-exact-active {
   color: var(--foreground);
   border-color: var(--accent);
 }
@@ -621,15 +626,56 @@ output {
   .brand {
     flex: 1;
   }
-  nav {
+  .main-nav {
     order: 3;
     flex-basis: 100%;
     gap: 1rem;
     flex-wrap: wrap;
   }
-  nav a {
+  .main-nav a {
     min-height: 48px;
     font-size: 0.8125rem;
+  }
+  /* Signed-in users get a bottom tab bar: always visible and within thumb reach. */
+  .header-content:has(.tab-bar) {
+    flex-wrap: nowrap;
+    padding-top: 0;
+    min-height: 60px;
+  }
+  .main-nav.tab-bar {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 40;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--background);
+    border-top: 1px solid var(--line);
+  }
+  .main-nav.tab-bar a {
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.25rem;
+    min-height: 60px;
+    padding-inline: 0.25rem;
+    border-bottom: 0;
+    border-top: 2px solid transparent;
+    font-size: 0.6875rem;
+    text-align: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .main-nav.tab-bar a[aria-current="page"],
+  .main-nav.tab-bar a.router-link-exact-active {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .main-nav.tab-bar svg {
+    display: block;
+  }
+  .app-shell:has(.tab-bar) {
+    padding-bottom: calc(61px + env(safe-area-inset-bottom));
   }
   .page-content {
     padding-block: 2.5rem;

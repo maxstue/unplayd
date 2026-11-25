@@ -8,8 +8,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-
-	"github.com/lib/pq"
 )
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -204,7 +202,7 @@ func upsertGame(ctx context.Context, tx *sql.Tx, game SourceGame, platformIDs []
 			}
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO catalog.game_platforms(game_id, platform_id)
-			SELECT $1, unnest($2::uuid[])`, id, pq.Array(platformIDs))
+			SELECT $1, unnest($2::uuid[])`, id, platformIDs)
 		return id, err
 	case err != nil:
 		return "", err
@@ -216,7 +214,7 @@ func upsertGame(ctx context.Context, tx *sql.Tx, game SourceGame, platformIDs []
 			INSERT INTO catalog.game_platforms(game_id, platform_id) SELECT $1, unnest($2::uuid[])
 			ON CONFLICT DO NOTHING RETURNING 1
 		)
-		SELECT EXISTS (SELECT 1 FROM removed) OR EXISTS (SELECT 1 FROM added)`, id, pq.Array(platformIDs)).Scan(&platformsChanged); err != nil {
+		SELECT EXISTS (SELECT 1 FROM removed) OR EXISTS (SELECT 1 FROM added)`, id, platformIDs).Scan(&platformsChanged); err != nil {
 		return "", err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE catalog.games SET title = $2, cover_url = $3, kind = $5, updated_at = now()
@@ -248,13 +246,13 @@ func assignParents(ctx context.Context, tx *sql.Tx, games []SourceGame, ids map[
 	if _, err := tx.ExecContext(ctx, `UPDATE catalog.games g SET parent_id = m.parent_id, updated_at = now()
 		FROM unnest($1::uuid[], $2::uuid[]) AS m(id, parent_id)
 		WHERE m.parent_id IS NOT NULL AND g.parent_id = m.id AND g.id <> m.parent_id AND NOT (g.id = ANY($1::uuid[]))`,
-		pq.Array(gameIDs), pq.Array(parentIDs)); err != nil {
+		gameIDs, parentIDs); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE catalog.games g SET parent_id = m.parent_id, updated_at = now()
 		FROM unnest($1::uuid[], $2::uuid[]) AS m(id, parent_id)
 		WHERE g.id = m.id AND g.parent_id IS DISTINCT FROM m.parent_id`,
-		pq.Array(gameIDs), pq.Array(parentIDs))
+		gameIDs, parentIDs)
 	return err
 }
 
@@ -329,7 +327,7 @@ func childCounts(ctx context.Context, db querier, parentIDs []string) (map[strin
 	rows, err := db.QueryContext(ctx, `SELECT parent_id, kind, count(*) FROM catalog.games
 		WHERE parent_id = ANY($1::uuid[]) AND is_active
 		GROUP BY parent_id, kind ORDER BY parent_id, array_position($2::text[], kind)`,
-		pq.Array(parentIDs), pq.Array(kinds))
+		parentIDs, kinds)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +355,7 @@ func (s *Store) Detail(ctx context.Context, id string) (Detail, error) {
 	}
 	defer tx.Rollback()
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM catalog.games WHERE parent_id = $1 AND is_active
-		ORDER BY array_position($2::text[], kind), lower(title), id`, id, pq.Array(kinds))
+		ORDER BY array_position($2::text[], kind), lower(title), id`, id, kinds)
 	if err != nil {
 		return Detail{}, err
 	}
@@ -400,7 +398,7 @@ func loadGames(ctx context.Context, db querier, ids []string) ([]Game, error) {
 		LEFT JOIN catalog.game_platforms gp ON gp.game_id = g.id
 		LEFT JOIN catalog.platforms p ON p.id = gp.platform_id
 		WHERE g.id = ANY($1::uuid[])
-		ORDER BY g.id, lower(p.name), p.id`, pq.Array(ids))
+		ORDER BY g.id, lower(p.name), p.id`, ids)
 	if err != nil {
 		return nil, err
 	}

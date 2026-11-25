@@ -47,7 +47,9 @@ func (c Config) connectionString() string {
 	query := endpoint.Query()
 	query.Set("search_path", "catalog")
 	// Defaults apply to application pools. Migration sessions opt out below.
-	for name, value := range map[string]string{"connect_timeout": "3", "statement_timeout": "2000", "lock_timeout": "1000"} {
+	// sslmode keeps the TLS requirement lib/pq applied by default; pgx would
+	// otherwise fall back to plaintext when the server offers no TLS.
+	for name, value := range map[string]string{"connect_timeout": "3", "statement_timeout": "2000", "lock_timeout": "1000", "sslmode": "require"} {
 		if query.Get(name) == "" {
 			query.Set(name, value)
 		}

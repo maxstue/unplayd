@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const (
@@ -188,7 +188,7 @@ func (s *Store) recordSearch(ctx context.Context, key string, gameIDs []string) 
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO catalog.search_query_games(query_key, game_id)
-		SELECT $1, unnest($2::uuid[]) ON CONFLICT DO NOTHING`, key, pq.Array(gameIDs)); err != nil {
+		SELECT $1, unnest($2::uuid[]) ON CONFLICT DO NOTHING`, key, gameIDs); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -237,9 +237,9 @@ func (q localQuery) searchArgs() []any {
 	patterns := q.patterns()
 	longest := slices.MaxFunc(patterns, func(a, b string) int { return len(a) - len(b) })
 	return []any{
-		q.key, pq.Array(patterns), q.text, escapeLike(q.text) + "%",
+		q.key, patterns, q.text, escapeLike(q.text) + "%",
 		sql.NullString{String: q.platformID, Valid: q.platformID != ""},
-		q.filter.Parents, pq.Array(q.filter.Kinds), !q.filter.empty(),
+		q.filter.Parents, q.filter.Kinds, !q.filter.empty(),
 		afterID, afterRank, q.limit + 1, longest, afterTitle,
 	}
 }
@@ -276,10 +276,12 @@ func (s *Store) search(ctx context.Context, q localQuery) ([]SearchHit, *cursor,
 		title     string
 		updatedAt time.Time
 	}
+	// types decodes the children array, which database/sql cannot scan into a slice.
+	types := pgtype.NewMap()
 	var found []row
 	for rows.Next() {
 		var hit row
-		if err := rows.Scan(&hit.id, &hit.rank, pq.Array(&hit.children), &hit.title, &hit.updatedAt); err != nil {
+		if err := rows.Scan(&hit.id, &hit.rank, types.SQLScanner(&hit.children), &hit.title, &hit.updatedAt); err != nil {
 			rows.Close()
 			return nil, nil, err
 		}

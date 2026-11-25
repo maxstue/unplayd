@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/database/postgres"
+	pgxmigrate "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	_ "github.com/lib/pq"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 //go:embed migrations/*.sql
@@ -38,7 +38,7 @@ func Open(ctx context.Context, config Config) (*sql.DB, error) {
 func open(ctx context.Context, config Config) (*sql.DB, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	db, err := sql.Open("postgres", config.connectionString())
+	db, err := sql.Open("pgx", config.connectionString())
 	if err != nil {
 		return nil, err
 	}
@@ -68,11 +68,11 @@ func migrateDatabase(ctx context.Context, config Config, target *uint) error {
 	if err != nil {
 		return err
 	}
-	driver, err := postgres.WithInstance(db, &postgres.Config{SchemaName: "catalog", MigrationsTable: "schema_migrations"})
+	driver, err := pgxmigrate.WithInstance(db, &pgxmigrate.Config{SchemaName: "catalog", MigrationsTable: "schema_migrations"})
 	if err != nil {
 		return err
 	}
-	runner, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	runner, err := migrate.NewWithInstance("iofs", source, "pgx5", driver)
 	if err != nil {
 		return err
 	}

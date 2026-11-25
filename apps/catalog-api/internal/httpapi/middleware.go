@@ -75,15 +75,30 @@ func withAuth(serviceToken string, next http.Handler) http.Handler {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		scheme, token, found := strings.Cut(r.Header.Get("Authorization"), " ")
-		provided := sha256.Sum256([]byte(token))
-		if len(r.Header.Values("Authorization")) != 1 || !found || !strings.EqualFold(scheme, "Bearer") || token == "" || strings.ContainsAny(token, " \t\r\n") || serviceToken == "" || subtle.ConstantTimeCompare(expected[:], provided[:]) != 1 {
+		// An empty configured token rejects every request instead of matching an empty credential.
+		if serviceToken == "" || !validBearer(r.Header.Values("Authorization"), expected) {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			writeError(w, r, http.StatusUnauthorized, "unauthorized", "Unauthorized")
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// validBearer reports whether the Authorization header values hold exactly one
+// "Bearer <token>" credential whose token hashes to expected. The scheme is
+// case-insensitive; the token must be separated by a single space and contain
+// no whitespace. Hashes are compared in constant time.
+func validBearer(values []string, expected [sha256.Size]byte) bool {
+	if len(values) != 1 {
+		return false
+	}
+	scheme, token, found := strings.Cut(values[0], " ")
+	if !found || !strings.EqualFold(scheme, "Bearer") || token == "" || strings.ContainsAny(token, " \t\r\n") {
+		return false
+	}
+	provided := sha256.Sum256([]byte(token))
+	return subtle.ConstantTimeCompare(expected[:], provided[:]) == 1
 }
 
 // statusRecorder remembers the response status for the request log.

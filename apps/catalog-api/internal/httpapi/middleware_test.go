@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -41,6 +42,37 @@ func TestRequestIDIsValidatedAndReturned(t *testing.T) {
 			}
 			if !tc.preserve && id == tc.id {
 				t.Fatalf("invalid request ID was reused")
+			}
+		})
+	}
+}
+
+func TestValidBearer(t *testing.T) {
+	token := "service-token"
+	expected := sha256.Sum256([]byte(token))
+	for _, tc := range []struct {
+		name   string
+		values []string
+		want   bool
+	}{
+		{"exact", []string{"Bearer " + token}, true},
+		{"lowercase scheme", []string{"bearer " + token}, true},
+		{"uppercase scheme", []string{"BEARER " + token}, true},
+		{"none", nil, false},
+		{"empty", []string{""}, false},
+		{"two values", []string{"Bearer " + token, "Bearer " + token}, false},
+		{"wrong token", []string{"Bearer other"}, false},
+		{"token prefix", []string{"Bearer service"}, false},
+		{"other scheme", []string{"Basic " + token}, false},
+		{"no scheme", []string{token}, false},
+		{"empty token", []string{"Bearer "}, false},
+		{"double space", []string{"Bearer  " + token}, false},
+		{"tab separator", []string{"Bearer\t" + token}, false},
+		{"trailing newline", []string{"Bearer " + token + "\n"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := validBearer(tc.values, expected); got != tc.want {
+				t.Fatalf("validBearer(%q) = %v, want %v", tc.values, got, tc.want)
 			}
 		})
 	}

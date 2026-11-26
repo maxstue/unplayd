@@ -1,4 +1,5 @@
-import { createError, setResponseHeader, type H3Event } from "h3";
+import { createError, type H3Event } from "h3";
+import { retryAfterSeconds } from "../../shared/http";
 import { requireSession } from "../auth/session";
 import { createCatalogClient } from "./catalog";
 import { createUserClient } from "./user";
@@ -34,7 +35,7 @@ interface UpstreamOptions {
   allowEmpty?: boolean;
   signal?: AbortSignal;
   allowedStatuses?: readonly number[];
-  searchEvent?: H3Event;
+  onRetryAfter?: (seconds: number) => void;
 }
 
 function reportUpstreamFailure(
@@ -77,14 +78,14 @@ function reportUpstreamException(
  * @param service - Which upstream is called, used for logging and the default allowed statuses.
  * @param requestId - Correlation ID for logs and public errors.
  * @param options - {@link UpstreamOptions}: `allowEmpty` for bodiless responses, the request `signal`,
- *   `allowedStatuses` to pass through instead of 503, and `searchEvent` to forward a pending search.
+ *   `allowedStatuses` to pass through instead of 503, and `onRetryAfter` to handle a retryable 503.
  * @returns The response `data` and HTTP `status`.
  */
 export async function upstream<T>(
   task: () => Promise<{ data?: T; response: Response }>,
   service: "user" | "catalog",
   requestId: string,
-  { allowEmpty = false, signal, allowedStatuses, searchEvent }: UpstreamOptions = {},
+  { allowEmpty = false, signal, allowedStatuses, onRetryAfter }: UpstreamOptions = {},
 ) {
   let result;
   try {
@@ -95,9 +96,12 @@ export async function upstream<T>(
   }
   if (!result.response.ok) {
     const status = result.response.status;
-    if (searchEvent && status === 503 && result.response.headers.get("Retry-After") === "1") {
-      setResponseHeader(searchEvent, "Retry-After", 1);
-      throw publicError(503, requestId);
+    if (onRetryAfter && status === 503) {
+      const seconds = retryAfterSeconds(result.response.headers);
+      if (seconds !== undefined) {
+        onRetryAfter(seconds);
+        throw publicError(503, requestId);
+      }
     }
     const allowed =
       allowedStatuses ?? (service === "user" ? [400, 401, 403, 404, 409] : [400, 404, 409]);

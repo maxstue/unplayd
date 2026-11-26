@@ -362,11 +362,15 @@ func testReadsWithoutProvider(t *testing.T, service *Service, source *fakeSource
 type blockingSource struct {
 	*fakeSource
 	release  chan struct{}
+	started  chan context.Context
 	searches atomic.Int32
 }
 
 func (b *blockingSource) Search(ctx context.Context, query string, filter SearchFilter, limit int) ([]SourceGame, error) {
 	b.searches.Add(1)
+	if b.started != nil {
+		b.started <- ctx
+	}
 	select {
 	case <-b.release:
 	case <-ctx.Done():
@@ -436,20 +440,38 @@ func waitForWaiters(t *testing.T, service *Service, query string, want int) {
 // cancellation is no provider failure that suspends other refreshes.
 func TestRefreshesAbandonedByEveryRequestAreCancelledWithoutCooldown(t *testing.T) {
 	store, _ := newTestStore(t)
-	source := &blockingSource{fakeSource: &fakeSource{games: []SourceGame{witcher}, known: searchable}, release: make(chan struct{})}
+	source := &blockingSource{
+		fakeSource: &fakeSource{games: []SourceGame{witcher}, known: searchable},
+		release:    make(chan struct{}),
+		started:    make(chan context.Context, 2),
+	}
 	service := newTestService(store, source, testPolicy)
-	t.Cleanup(service.Wait)
+	t.Cleanup(func() { service.Stop(); service.Wait() })
 
 	first, cancelFirst := context.WithCancel(t.Context())
 	second, cancelSecond := context.WithCancel(t.Context())
 	firstErr := searchInBackground(service, first, "witcher 3")
 	secondErr := searchInBackground(service, second, "witcher 3")
 	waitForWaiters(t, service, "witcher 3", 2)
+	var providerCtx context.Context
+	select {
+	case providerCtx = <-source.started:
+	case <-time.After(time.Second):
+		t.Fatal("refresh did not reach the provider")
+	}
 	cancelFirst()
 	assertErrorIs(t, <-firstErr, context.Canceled)
-	waitForWaiters(t, service, "witcher 3", 1)
+	if providerCtx.Err() != nil {
+		t.Fatal("refresh was cancelled while another request was waiting")
+	}
 	cancelSecond()
 	assertErrorIs(t, <-secondErr, context.Canceled)
+	select {
+	case <-providerCtx.Done():
+		assertErrorIs(t, providerCtx.Err(), context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("provider context stayed active after the last caller cancelled")
+	}
 	service.Wait()
 
 	close(source.release)

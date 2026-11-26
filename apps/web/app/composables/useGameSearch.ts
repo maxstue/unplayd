@@ -1,5 +1,6 @@
 import { onScopeDispose, ref, shallowRef, watch, type Ref } from "vue";
 import type { CatalogPage, SearchHit } from "../../shared/catalog";
+import { retryAfterSeconds } from "../../shared/http";
 
 type FetchPage = (
   query: string,
@@ -7,24 +8,27 @@ type FetchPage = (
   signal: AbortSignal,
 ) => Promise<CatalogPage>;
 
-// Each attempt can spend two seconds waiting for the same catalog refresh.
-// Seven retries with a one-second delay cover its twenty-second deadline.
-const searchRetryLimit = 7;
+// Give the catalog's twenty-second refresh time to finish.
+const searchRetryWindowMs = 23_000;
 
-function isPendingSearch(error: unknown) {
-  return (
+function pendingSearchDelayMs(error: unknown) {
+  if (
     error instanceof Error &&
     "response" in error &&
     error.response instanceof Response &&
-    error.response.status === 503 &&
-    error.response.headers.get("Retry-After") === "1"
-  );
+    error.response.status === 503
+  ) {
+    const seconds = retryAfterSeconds(error.response.headers);
+    if (seconds !== undefined) {
+      return seconds * 1000;
+    }
+  }
 }
 
-async function waitForSearchRetry(signal: AbortSignal) {
+async function waitForSearchRetry(signal: AbortSignal, delayMs: number) {
   signal.throwIfAborted();
   await new Promise<void>((resolve) => {
-    const timeout = setTimeout(finish, 1000);
+    const timeout = setTimeout(finish, delayMs);
     function finish() {
       clearTimeout(timeout);
       signal.removeEventListener("abort", finish);
@@ -36,16 +40,19 @@ async function waitForSearchRetry(signal: AbortSignal) {
 }
 
 async function fetchSearchPage(fetchPage: FetchPage, term: string, signal: AbortSignal) {
-  let retries = 0;
+  const retryUntil = Date.now() + searchRetryWindowMs;
   for (;;) {
     try {
       return await fetchPage(term, null, signal);
     } catch (error) {
-      if (!isPendingSearch(error) || retries === searchRetryLimit) {
+      const delayMs = pendingSearchDelayMs(error);
+      if (delayMs === undefined || Date.now() + delayMs >= retryUntil) {
         throw error;
       }
-      retries++;
-      await waitForSearchRetry(signal);
+      await waitForSearchRetry(signal, delayMs);
+      if (Date.now() >= retryUntil) {
+        throw error;
+      }
     }
   }
 }
@@ -57,14 +64,14 @@ async function fetchSearchPage(fetchPage: FetchPage, term: string, signal: Abort
  * @param query - Search term; 2 to 200 characters after trimming trigger a search.
  * @param enabled - Pauses searching while `false`.
  * @param fetchPage - Loads one {@link CatalogPage}; must honor the given {@link AbortSignal}.
- * @param debounceMs - Delay before searching; `0` searches immediately.
+ * @param options - Debounce delay and whether to wait for a pending catalog refresh.
  * @returns Reactive {@link SearchHit} items and status, plus `retry` and `loadMore`.
  */
 export function useGameSearch(
   query: Ref<string>,
   enabled: Ref<boolean>,
   fetchPage: FetchPage,
-  debounceMs = 300,
+  { debounceMs = 300, retryPending = false } = {},
 ) {
   const items = shallowRef<SearchHit[]>([]);
   const nextCursor = ref<string | null>(null);
@@ -97,9 +104,10 @@ export function useGameSearch(
     }
     moreError.value = false;
     try {
-      const page = append
-        ? await fetchPage(term, nextCursor.value, signal)
-        : await fetchSearchPage(fetchPage, term, signal);
+      const page =
+        retryPending && !append
+          ? await fetchSearchPage(fetchPage, term, signal)
+          : await fetchPage(term, append ? nextCursor.value : null, signal);
       // Some transports resolve after abort; they must never replace newer results.
       if (current !== generation) {
         return;

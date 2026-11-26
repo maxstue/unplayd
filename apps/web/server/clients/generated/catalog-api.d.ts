@@ -30,7 +30,7 @@ export interface paths {
         };
         /**
          * Search the catalog
-         * @description Searches every kind of game. Editions, DLCs, expansions, remakes and other children are bundled under their parent unless a kind filter is given. Results come from stored games whose title contains every query word, plus games IGDB returned for the same query and kind filter; inactive games are excluded. Hits are ordered by best match (exact title, title prefix, every word, IGDB-only match), then title. The first page asks IGDB once the same query and kind filter were not answered by IGDB within 24 hours, waiting at most 2 seconds; follow-up pages never contact IGDB. When IGDB fails or is slow, stored games are returned and IGDB is not asked again for 30 seconds; without any stored match the response is 503.
+         * @description Searches every kind of game. Editions, DLCs, expansions, remakes and other children are bundled under their parent unless a kind filter is given. Results come from stored games whose title contains every query word, plus games IGDB returned for the same query and kind filter; inactive games are excluded. Hits are ordered by best match (exact title, title prefix, every word, IGDB-only match), then title. The first page asks IGDB once the same query and kind filter were not answered by IGDB within 24 hours, waiting at most 2 seconds; follow-up pages never contact IGDB. After the wait expires, the refresh continues in the background. Stored matches are returned when the refresh is pending or fails. Without stored matches, the response is 503, with Retry-After only while a refresh is pending. A failed refresh pauses new provider searches for 30 seconds.
          */
         get: operations["searchGames"];
         put?: never;
@@ -90,7 +90,7 @@ export interface paths {
         };
         /**
          * Suggest up to five games using cached IGDB search
-         * @description Autocomplete backed by the same IGDB search cache as full searches. New or stale queries refresh from IGDB; fresh queries are served locally for 24 hours. Returns up to five ranked active parent games, including parents of matching child games. Provider failures fall back to stored matches, or return unavailable when none exist. A successful provider search with no matches returns an empty list. No pagination is exposed; nextCursor is always null. Only query is accepted.
+         * @description Autocomplete searches games already stored in the catalog. Returns up to five ranked active parent games, including parents of matching child games. A query with no stored matches returns an empty list. No pagination is exposed; nextCursor is always null. Only query is accepted.
          */
         get: operations["suggestGames"];
         put?: never;
@@ -397,7 +397,18 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
-            503: components["responses"]["Unavailable"];
+            /** @description The search refresh is still running or the catalog is unavailable. */
+            503: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    /** @description Delay in seconds before retrying the same search. Present when the refresh is still running and the catalog has no stored matches. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getGame: {

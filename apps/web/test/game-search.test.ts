@@ -23,11 +23,11 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
-function setup(fetchPage: Parameters<typeof useGameSearch>[2]) {
+function setup(fetchPage: Parameters<typeof useGameSearch>[2], retryPending = true) {
   const scope = effectScope();
   const query = ref("");
   const enabled = ref(true);
-  const search = scope.run(() => useGameSearch(query, enabled, fetchPage))!;
+  const search = scope.run(() => useGameSearch(query, enabled, fetchPage, { retryPending }))!;
   scopes.push(scope);
   return { query, enabled, search, scope };
 }
@@ -143,7 +143,7 @@ describe("catalog search lifecycle", () => {
 
   it("keeps loading while a cold search refreshes and then shows results", async () => {
     const pending = Object.assign(new Error("Search still running"), {
-      response: new Response(null, { status: 503, headers: { "Retry-After": "1" } }),
+      response: new Response(null, { status: 503, headers: { "Retry-After": "2" } }),
     });
     const fetcher = vi
       .fn<Parameters<typeof useGameSearch>[2]>()
@@ -153,7 +153,9 @@ describe("catalog search lifecycle", () => {
     query.value = "Hollow";
     await vi.advanceTimersByTimeAsync(300);
     expect(search.status.value).toBe("loading");
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(search.items.value[0]?.game.id).toBe("Hollow Knight");
     expect(search.status.value).toBe("success");
@@ -174,6 +176,24 @@ describe("catalog search lifecycle", () => {
     await vi.advanceTimersByTimeAsync(1300);
     expect(fetcher.mock.calls.map(([term]) => term)).toEqual(["Hollow", "Hades"]);
     expect(search.items.value[0]?.game.id).toBe("Hades");
+  });
+
+  it.each([
+    { retryPending: true, retryAfter: "24" },
+    { retryPending: false, retryAfter: "1" },
+  ])("stops when the wait is too long or retries are disabled (%j)", async (options) => {
+    const pending = Object.assign(new Error("Search still running"), {
+      response: new Response(null, {
+        status: 503,
+        headers: { "Retry-After": options.retryAfter },
+      }),
+    });
+    const fetcher = vi.fn<Parameters<typeof useGameSearch>[2]>().mockRejectedValue(pending);
+    const { query, search } = setup(fetcher, options.retryPending);
+    query.value = "Hollow";
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(search.status.value).toBe("error");
   });
 
   it("cancels scheduled and in-flight work when leaving the page", async () => {
@@ -206,8 +226,8 @@ it("loads a committed search immediately while a separate draft only drives dela
     .fn<Parameters<typeof useGameSearch>[2]>()
     .mockResolvedValue(page("suggestion"));
   scope.run(() => {
-    useGameSearch(committed, enabled, fetchResults, 0);
-    useGameSearch(draft, enabled, fetchSuggestions, 500);
+    useGameSearch(committed, enabled, fetchResults, { debounceMs: 0, retryPending: true });
+    useGameSearch(draft, enabled, fetchSuggestions, { debounceMs: 500 });
   });
   draft.value = "Hollow";
   await vi.advanceTimersByTimeAsync(499);

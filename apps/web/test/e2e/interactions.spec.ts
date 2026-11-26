@@ -31,6 +31,19 @@ test("keyboard suggestion navigation retains the draft through details and retur
   await expect(page.getByRole("heading", { name: "Hollow Knight", exact: true })).toBeVisible();
 });
 
+test("a cold search shows results after the catalog asks the browser to retry", async ({
+  page,
+  request,
+}) => {
+  await request.post(`${fixture}/config`, { data: { pendingSearch: true } });
+  const pending = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/games" && response.status() === 503,
+  );
+  await page.goto("/?query=Hollow+Knight");
+  expect((await pending).headers()["retry-after"]).toBe("1");
+  await expect(page.getByRole("heading", { name: "Hollow Knight", exact: true })).toBeVisible();
+});
+
 test("a status mutation finishing after a filter change reconciles the current view", async ({
   page,
   request,

@@ -1,4 +1,4 @@
-import { setResponseStatus, type H3Event } from "h3";
+import { setResponseHeader, setResponseStatus, type H3Event } from "h3";
 import {
   withServices,
   withCatalogService,
@@ -42,7 +42,10 @@ export function searchGames(event: H3Event, config: ServicesConfig, fetcher?: ty
           () => s.catalog.GET("/games", { params: { query } }),
           "catalog",
           s.requestId,
-          { signal: s.signal, searchEvent: event },
+          {
+            signal: s.signal,
+            onRetryAfter: (seconds) => setResponseHeader(event, "Retry-After", seconds),
+          },
         )
       ).data;
       return withLibraryState(page, event, config, s, fetcher);
@@ -95,7 +98,7 @@ export function suggestGames(event: H3Event, config: ServicesConfig, fetcher?: t
           () => s.catalog.GET("/games/suggestions", { params: { query } }),
           "catalog",
           s.requestId,
-          { signal: s.signal, searchEvent: event },
+          { signal: s.signal },
         )
       ).data;
     },

@@ -58,16 +58,15 @@ type Service struct {
 }
 
 // refreshCall is one provider refresh shared by every request for the same
-// search. waiters, kept and abandoned are guarded by Service.mu.
+// search. waiters, keepAfterTimeout and abandoned are guarded by Service.mu.
 type refreshCall struct {
 	done   chan struct{}
 	err    error
 	cancel context.CancelFunc
 	// waiters counts the requests currently waiting for the result.
 	waiters int
-	// kept records that a request stopped waiting without aborting, so the
-	// result is still wanted by the next request for the search.
-	kept bool
+	// keepAfterTimeout lets the refresh finish for a request that will retry.
+	keepAfterTimeout bool
 	// abandoned records that every waiter aborted and the refresh was cancelled.
 	abandoned bool
 }
@@ -115,6 +114,16 @@ func (s *Service) Search(ctx context.Context, request SearchRequest) (SearchPage
 	return page, nil
 }
 
+// Suggestions returns up to five matches from the stored catalog.
+func (s *Service) Suggestions(ctx context.Context, text string) ([]SearchHit, error) {
+	query, err := newLocalQuery(SearchRequest{Query: text, Limit: 5})
+	if err != nil {
+		return nil, err
+	}
+	hits, _, err := s.store.search(ctx, query)
+	return hits, err
+}
+
 // Detail returns a stored game, including inactive ones, with its active children.
 func (s *Service) Detail(ctx context.Context, id string) (Detail, error) {
 	id, err := canonicalID(id)
@@ -160,7 +169,6 @@ func (s *Service) refresh(ctx context.Context, query localQuery) (providerErr, e
 	defer timer.Stop()
 	select {
 	case <-call.done:
-		s.leave(query.key, call, false)
 		return call.err, nil
 	case <-timer.C:
 		s.leave(query.key, call, false)
@@ -172,18 +180,16 @@ func (s *Service) refresh(ctx context.Context, query localQuery) (providerErr, e
 }
 
 // leave ends one request's wait for call. A refresh whose waiters all aborted
-// before any of them timed out is cancelled: search-as-you-type abandons a
-// request per superseded prefix, and those refreshes would otherwise keep
-// consuming the provider's rate limit ahead of the search the user wants.
+// before any of them timed out is cancelled to free capacity for other searches.
 func (s *Service) leave(key string, call *refreshCall, aborted bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	call.waiters--
 	if !aborted {
-		call.kept = true
+		call.keepAfterTimeout = true
 		return
 	}
-	if call.waiters > 0 || call.kept || s.inflight[key] != call {
+	if call.waiters > 0 || call.keepAfterTimeout || s.inflight[key] != call {
 		return
 	}
 	call.abandoned = true

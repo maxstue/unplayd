@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
@@ -36,8 +36,8 @@ func TestDatabaseStatementAndLockWaitsAreBounded(t *testing.T) {
 	defer db.Close()
 	assertState := func(err error, state string) {
 		t.Helper()
-		var failure *pq.Error
-		if !errors.As(err, &failure) || string(failure.Code) != state {
+		var failure *pgconn.PgError
+		if !errors.As(err, &failure) || failure.Code != state {
 			t.Fatalf("error=%v, want SQLSTATE %s", err, state)
 		}
 	}
@@ -126,7 +126,7 @@ func newPostgresFixture(t *testing.T) postgresFixture {
 
 func openFixtureDatabase(t *testing.T, connection string) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("postgres", connection)
+	db, err := sql.Open("pgx", connection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,11 +158,11 @@ func executeSQL(t *testing.T, db *sql.DB, query string, args ...any) {
 func assertPostgresError(t *testing.T, db *sql.DB, code, query string, args ...any) {
 	t.Helper()
 	_, err := db.ExecContext(t.Context(), query, args...)
-	var postgresError *pq.Error
+	var postgresError *pgconn.PgError
 	if !errors.As(err, &postgresError) {
 		t.Fatalf("expected PostgreSQL SQLSTATE %s, got %v", code, err)
 	}
-	if string(postgresError.Code) != code {
+	if postgresError.Code != code {
 		t.Fatalf("expected PostgreSQL SQLSTATE %s, got %s: %v", code, postgresError.Code, err)
 	}
 }

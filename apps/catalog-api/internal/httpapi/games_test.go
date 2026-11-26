@@ -1,13 +1,7 @@
 package httpapi
 
 import (
-	"bytes"
-	"context"
-	"crypto/rand"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -17,104 +11,7 @@ import (
 	"time"
 
 	"github.com/maxstue/unplayd/apps/catalog-api/internal/catalog"
-	"github.com/maxstue/unplayd/apps/catalog-api/internal/requestid"
 )
-
-// fakeCatalog records the requests it receives and answers with fixed results.
-type fakeCatalog struct {
-	search   catalog.SearchRequest
-	detailID string
-	batchIDs []string
-	calls    int
-	page     catalog.SearchPage
-	detail   catalog.Detail
-	batch    catalog.Batch
-	err      error
-	deadline time.Time
-}
-
-func (f *fakeCatalog) Search(ctx context.Context, request catalog.SearchRequest) (catalog.SearchPage, error) {
-	f.calls++
-	f.deadline, _ = ctx.Deadline()
-	f.search = request
-	return f.page, f.err
-}
-
-func (f *fakeCatalog) Detail(_ context.Context, id string) (catalog.Detail, error) {
-	f.calls++
-	f.detailID = id
-	return f.detail, f.err
-}
-
-func (f *fakeCatalog) Batch(_ context.Context, ids []string) (catalog.Batch, error) {
-	f.calls++
-	f.batchIDs = ids
-	return f.batch, f.err
-}
-
-func newTestHandler(token string, games Catalog) http.Handler {
-	return NewHandler(token, games, slog.New(slog.DiscardHandler))
-}
-
-const testToken = "test-service-token-with-at-least-32-bytes"
-
-func TestCatalogRequestsHaveABoundedDeadline(t *testing.T) {
-	games := &fakeCatalog{}
-	before := time.Now()
-	serve(newTestHandler(testToken, games), http.MethodGet, "/games?query=halo", "")
-	if games.deadline.IsZero() || games.deadline.After(before.Add(3*time.Second+100*time.Millisecond)) {
-		t.Fatalf("request deadline=%v, want at most three seconds", games.deadline)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-	defer cancel()
-	request := httptest.NewRequest(http.MethodGet, "/games?query=halo", nil).WithContext(ctx)
-	request.Header.Set("Authorization", "Bearer "+testToken)
-	newTestHandler(testToken, games).ServeHTTP(httptest.NewRecorder(), request)
-	expected, _ := ctx.Deadline()
-	if !games.deadline.Equal(expected) {
-		t.Fatal("shorter caller deadline was not preserved")
-	}
-}
-
-func serve(handler http.Handler, method, target, body string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, target, strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+testToken)
-	req.Header.Set("X-Request-ID", "games_test-1")
-	if body != "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, req)
-	return response
-}
-
-func assertError(t *testing.T, response *httptest.ResponseRecorder, status int, code string) {
-	t.Helper()
-	if response.Code != status {
-		t.Fatalf("status = %d, want %d: %s", response.Code, status, response.Body)
-	}
-	var body struct {
-		Error struct{ Code, Message, RequestID string }
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body.Error.Code != code || body.Error.Message == "" || body.Error.RequestID != response.Header().Get("X-Request-ID") {
-		t.Fatalf("error envelope = %+v, want code %s", body.Error, code)
-	}
-}
-
-func decode[T any](t *testing.T, response *httptest.ResponseRecorder) T {
-	t.Helper()
-	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/json" {
-		t.Fatalf("status = %d: %s", response.Code, response.Body)
-	}
-	var body T
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	return body
-}
 
 var (
 	cover     = "https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg"
@@ -196,44 +93,6 @@ func TestSearchRejectsMalformedParametersBeforeTheCatalog(t *testing.T) {
 	}
 }
 
-func TestCatalogErrorsMapToContractResponses(t *testing.T) {
-	secret := "postgres://catalog:secret@db/internal"
-	for _, tc := range []struct {
-		name   string
-		err    error
-		status int
-		code   string
-	}{
-		{"invalid request", fmt.Errorf("%w: limit must be between 1 and 50", catalog.ErrInvalidRequest), http.StatusBadRequest, "invalid_request"},
-		{"not found", catalog.ErrNotFound, http.StatusNotFound, "not_found"},
-		{"provider unavailable", fmt.Errorf("%w: %s", catalog.ErrUnavailable, secret), http.StatusServiceUnavailable, "unavailable"},
-		{"deadline exceeded", context.DeadlineExceeded, http.StatusServiceUnavailable, "unavailable"},
-		{"internal failure", errors.New(secret), http.StatusInternalServerError, "internal_error"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			handler := newTestHandler(testToken, &fakeCatalog{err: tc.err})
-			for _, request := range []struct{ method, target, body string }{
-				{http.MethodGet, "/games?query=zelda", ""},
-				{http.MethodGet, "/games/" + parent.ID, ""},
-				{http.MethodPost, "/games/batch", `{"gameIds":["` + parent.ID + `"]}`},
-			} {
-				response := serve(handler, request.method, request.target, request.body)
-				assertError(t, response, tc.status, tc.code)
-				if strings.Contains(response.Body.String(), "secret") {
-					t.Fatal("error response leaked internal details")
-				}
-			}
-		})
-	}
-	t.Run("invalid request message is public", func(t *testing.T) {
-		response := serve(newTestHandler(testToken, &fakeCatalog{err: fmt.Errorf("%w: limit must be between 1 and 50", catalog.ErrInvalidRequest)}),
-			http.MethodGet, "/games?query=zelda", "")
-		if !strings.Contains(response.Body.String(), `"message":"Limit must be between 1 and 50."`) {
-			t.Fatalf("body = %s", response.Body)
-		}
-	})
-}
-
 func TestDetailPassesThePathIDAndGroupsChildren(t *testing.T) {
 	games := &fakeCatalog{detail: catalog.Detail{Game: parent, Children: []catalog.ChildGroup{{Kind: catalog.KindExpansion, Games: []catalog.Game{child}}}}}
 	body := decode[gameDetailDTO](t, serve(newTestHandler(testToken, games), http.MethodGet, "/games/"+parent.ID, ""))
@@ -282,39 +141,6 @@ func TestBatchRequiresAStrictJSONBody(t *testing.T) {
 			t.Fatalf("batch ids %v body %s", games.batchIDs, response.Body)
 		}
 	})
-}
-
-func TestRequestLogsCarryRequestIDWithoutCredentials(t *testing.T) {
-	var logs bytes.Buffer
-	logger := slog.New(requestid.LogHandler{Handler: slog.NewJSONHandler(&logs, nil)})
-	token := rand.Text() + rand.Text()
-	handler := NewHandler(token, &fakeCatalog{err: errors.New("database down")}, logger)
-	req := httptest.NewRequest(http.MethodGet, "/games?query=zelda", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-Request-ID", "log_trace-42")
-	handler.ServeHTTP(httptest.NewRecorder(), req)
-	var entries []map[string]any
-	for line := range strings.Lines(logs.String()) {
-		var entry map[string]any
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			t.Fatal(err)
-		}
-		entries = append(entries, entry)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("log entries = %v, want failure and completion", entries)
-	}
-	for _, entry := range entries {
-		if entry["requestId"] != "log_trace-42" {
-			t.Fatalf("log entry without request ID: %v", entry)
-		}
-	}
-	if entries[0]["error"] != "database down" || entries[1]["status"] != float64(500) || entries[1]["path"] != "/games" {
-		t.Fatalf("log entries = %v", entries)
-	}
-	if strings.Contains(logs.String(), token) || strings.Contains(logs.String(), "zelda") {
-		t.Fatal("logs contain credentials or query strings")
-	}
 }
 
 func TestSuggestionsUseABoundedSearch(t *testing.T) {

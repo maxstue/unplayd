@@ -26,9 +26,23 @@ func TestConnectionConfigurationEncodesCredentialsAndOwnSchema(t *testing.T) {
 	if strings.Contains(fmt.Sprint(config), password) {
 		t.Fatal("configuration diagnostics expose credentials")
 	}
-	for key, want := range map[string]string{"connect_timeout": "3", "statement_timeout": "2000", "lock_timeout": "1000"} {
+	for key, want := range map[string]string{"connect_timeout": "3", "statement_timeout": "2000", "lock_timeout": "1000", "sslmode": "disable"} {
 		if got := connection.Query().Get(key); got != want {
 			t.Fatalf("%s=%s, want %s", key, got, want)
+		}
+	}
+}
+
+func TestConnectionRequiresTLSUnlessConfigured(t *testing.T) {
+	values := map[string]string{"DATABASE_URL": "postgresql://db.internal/unplayd", "DATABASE_PASSWORD": rand.Text()}
+	config, err := Load(func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, connection := range []string{config.connectionString(), config.migrationConfig().connectionString()} {
+		parsed, _ := url.Parse(connection)
+		if got := parsed.Query().Get("sslmode"); got != "require" {
+			t.Fatalf("sslmode=%s, want require", got)
 		}
 	}
 }

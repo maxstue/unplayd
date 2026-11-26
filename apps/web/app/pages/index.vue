@@ -19,7 +19,7 @@ const { items, status, nextCursor, loadingMore, moreError, retry, loadMore } = u
       signal,
       retry: 0,
     }),
-  0,
+  { debounceMs: 0, retryPending: true },
 );
 async function submitSearch(term: string) {
   if (term === query.value) {

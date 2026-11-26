@@ -30,15 +30,16 @@ func TestLivenessReturnsServiceIdentity(t *testing.T) {
 
 // fakeCatalog records the requests it receives and answers with fixed results.
 type fakeCatalog struct {
-	search   catalog.SearchRequest
-	detailID string
-	batchIDs []string
-	calls    int
-	page     catalog.SearchPage
-	detail   catalog.Detail
-	batch    catalog.Batch
-	err      error
-	deadline time.Time
+	search     catalog.SearchRequest
+	suggestion string
+	detailID   string
+	batchIDs   []string
+	calls      int
+	page       catalog.SearchPage
+	detail     catalog.Detail
+	batch      catalog.Batch
+	err        error
+	deadline   time.Time
 }
 
 func (f *fakeCatalog) Search(ctx context.Context, request catalog.SearchRequest) (catalog.SearchPage, error) {
@@ -46,6 +47,12 @@ func (f *fakeCatalog) Search(ctx context.Context, request catalog.SearchRequest)
 	f.deadline, _ = ctx.Deadline()
 	f.search = request
 	return f.page, f.err
+}
+
+func (f *fakeCatalog) Suggestions(_ context.Context, text string) ([]catalog.SearchHit, error) {
+	f.calls++
+	f.suggestion = text
+	return f.page.Hits, f.err
 }
 
 func (f *fakeCatalog) Detail(_ context.Context, id string) (catalog.Detail, error) {

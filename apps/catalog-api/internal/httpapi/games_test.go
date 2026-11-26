@@ -147,8 +147,8 @@ func TestSuggestionsUseABoundedSearch(t *testing.T) {
 	games := &fakeCatalog{page: catalog.SearchPage{Hits: []catalog.SearchHit{{Game: parent}}, NextCursor: "unused"}}
 	response := serve(newTestHandler(testToken, games), http.MethodGet, "/games/suggestions?query=witcher", "")
 	body := decode[gamePageDTO](t, response)
-	if games.search.Query != "witcher" || games.search.Limit != 5 || games.search.Cursor != "" {
-		t.Fatalf("suggestion request = %+v", games.search)
+	if games.suggestion != "witcher" || games.search.Query != "" {
+		t.Fatalf("suggestion request = %q, provider-backed request = %+v", games.suggestion, games.search)
 	}
 	if len(body.Items) != 1 || body.Items[0].Game.ID != parent.ID || body.NextCursor != nil {
 		t.Fatalf("suggestion response = %+v", body)

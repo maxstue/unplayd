@@ -12,6 +12,7 @@ import (
 // Catalog answers the catalog routes.
 type Catalog interface {
 	Search(ctx context.Context, request catalog.SearchRequest) (catalog.SearchPage, error)
+	Suggestions(ctx context.Context, text string) ([]catalog.SearchHit, error)
 	Detail(ctx context.Context, id string) (catalog.Detail, error)
 	Batch(ctx context.Context, ids []string) (catalog.Batch, error)
 }

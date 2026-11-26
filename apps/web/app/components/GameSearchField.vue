@@ -26,7 +26,7 @@ const { items, status } = useGameSearch(
   suggestionEnabled,
   (term, _cursor, signal) =>
     $fetch("/api/games/suggestions", { query: { query: term }, signal, retry: 0 }),
-  500,
+  { debounceMs: 500 },
 );
 const matches = computed(() => items.value.slice(0, 5).map((hit) => hit.game));
 const expanded = computed(

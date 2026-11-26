@@ -43,6 +43,7 @@ let libraries: Record<string, Entry[]>;
 let failLibrary = false;
 let failDelete = false;
 let failCatalog = false;
+let pendingSearch = false;
 let holdStatus = false;
 let releaseStatus: (() => void) | undefined;
 function reset() {
@@ -52,6 +53,7 @@ function reset() {
   failLibrary = false;
   failDelete = false;
   failCatalog = false;
+  pendingSearch = false;
   holdStatus = false;
 }
 reset();
@@ -88,6 +90,9 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     if (typeof config.failCatalog === "boolean") {
       failCatalog = config.failCatalog;
     }
+    if (typeof config.pendingSearch === "boolean") {
+      pendingSearch = config.pendingSearch;
+    }
     if (typeof config.holdStatus === "boolean") {
       holdStatus = config.holdStatus;
     }
@@ -119,6 +124,11 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
       });
     }
     if (path === "/games" || path === "/games/suggestions") {
+      if (path === "/games" && pendingSearch) {
+        pendingSearch = false;
+        response.setHeader("Retry-After", "1");
+        return json(response, {}, 503);
+      }
       const query = url.searchParams.get("query")?.toLowerCase() ?? "";
       return json(response, {
         items: games

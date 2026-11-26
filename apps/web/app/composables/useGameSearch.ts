@@ -1,11 +1,61 @@
 import { onScopeDispose, ref, shallowRef, watch, type Ref } from "vue";
-import type { CatalogPage, SearchHit } from "../../shared/catalog";
+import type { CatalogPage, SearchHit } from "#shared/catalog";
+import { retryAfterSeconds } from "#shared/http";
 
 type FetchPage = (
   query: string,
   cursor: string | null,
   signal: AbortSignal,
 ) => Promise<CatalogPage>;
+
+// Give the catalog's twenty-second refresh time to finish.
+const searchRetryWindowMs = 23_000;
+
+function pendingSearchDelayMs(error: unknown) {
+  if (
+    error instanceof Error &&
+    "response" in error &&
+    error.response instanceof Response &&
+    error.response.status === 503
+  ) {
+    const seconds = retryAfterSeconds(error.response.headers);
+    if (seconds !== undefined) {
+      return seconds * 1000;
+    }
+  }
+}
+
+async function waitForSearchRetry(signal: AbortSignal, delayMs: number) {
+  signal.throwIfAborted();
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(finish, delayMs);
+    function finish() {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal.addEventListener("abort", finish, { once: true });
+  });
+  signal.throwIfAborted();
+}
+
+async function fetchSearchPage(fetchPage: FetchPage, term: string, signal: AbortSignal) {
+  const retryUntil = Date.now() + searchRetryWindowMs;
+  for (;;) {
+    try {
+      return await fetchPage(term, null, signal);
+    } catch (error) {
+      const delayMs = pendingSearchDelayMs(error);
+      if (delayMs === undefined || Date.now() + delayMs >= retryUntil) {
+        throw error;
+      }
+      await waitForSearchRetry(signal, delayMs);
+      if (Date.now() >= retryUntil) {
+        throw error;
+      }
+    }
+  }
+}
 
 /**
  * Debounced, cancellable catalog search with cursor pagination. Stale responses never replace newer
@@ -14,14 +64,14 @@ type FetchPage = (
  * @param query - Search term; 2 to 200 characters after trimming trigger a search.
  * @param enabled - Pauses searching while `false`.
  * @param fetchPage - Loads one {@link CatalogPage}; must honor the given {@link AbortSignal}.
- * @param debounceMs - Delay before searching; `0` searches immediately.
+ * @param options - Debounce delay and whether to wait for a pending catalog refresh.
  * @returns Reactive {@link SearchHit} items and status, plus `retry` and `loadMore`.
  */
 export function useGameSearch(
   query: Ref<string>,
   enabled: Ref<boolean>,
   fetchPage: FetchPage,
-  debounceMs = 300,
+  { debounceMs = 300, retryPending = false } = {},
 ) {
   const items = shallowRef<SearchHit[]>([]);
   const nextCursor = ref<string | null>(null);
@@ -46,6 +96,7 @@ export function useGameSearch(
       return;
     }
     controller = new AbortController();
+    const signal = controller.signal;
     if (append) {
       loadingMore.value = true;
     } else {
@@ -53,7 +104,10 @@ export function useGameSearch(
     }
     moreError.value = false;
     try {
-      const page = await fetchPage(term, append ? nextCursor.value : null, controller.signal);
+      const page =
+        retryPending && !append
+          ? await fetchSearchPage(fetchPage, term, signal)
+          : await fetchPage(term, append ? nextCursor.value : null, signal);
       // Some transports resolve after abort; they must never replace newer results.
       if (current !== generation) {
         return;

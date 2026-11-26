@@ -362,11 +362,15 @@ func testReadsWithoutProvider(t *testing.T, service *Service, source *fakeSource
 type blockingSource struct {
 	*fakeSource
 	release  chan struct{}
+	started  chan context.Context
 	searches atomic.Int32
 }
 
 func (b *blockingSource) Search(ctx context.Context, query string, filter SearchFilter, limit int) ([]SourceGame, error) {
 	b.searches.Add(1)
+	if b.started != nil {
+		b.started <- ctx
+	}
 	select {
 	case <-b.release:
 	case <-ctx.Done():
@@ -386,12 +390,124 @@ func TestSlowRefreshesFinishInTheBackgroundAndAreShared(t *testing.T) {
 	for range 2 {
 		_, err := service.Search(t.Context(), SearchRequest{Query: "witcher 3", Limit: 20})
 		assertErrorIs(t, err, ErrUnavailable)
+		assertErrorIs(t, err, ErrRefreshPending)
 	}
 	close(source.release)
 	service.Wait()
 	assertTitles(t, hitTitles(searchPage(t, service, SearchRequest{Query: "witcher 3"}).Hits), witcher.Title)
 	if source.searches.Load() != 1 {
 		t.Fatalf("provider searches = %d, want one shared refresh", source.searches.Load())
+	}
+}
+
+// searchInBackground starts a search with ctx and reports its error.
+func searchInBackground(service *Service, ctx context.Context, query string) <-chan error {
+	errs := make(chan error, 1)
+	go func() {
+		_, err := service.Search(ctx, SearchRequest{Query: query, Limit: 20})
+		errs <- err
+	}()
+	return errs
+}
+
+// waitForWaiters blocks until want requests wait for the refresh of query.
+func waitForWaiters(t *testing.T, service *Service, query string, want int) {
+	t.Helper()
+	local, err := newLocalQuery(SearchRequest{Query: query, Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		service.mu.Lock()
+		waiters := 0
+		if call, ok := service.inflight[local.key]; ok {
+			waiters = call.waiters
+		}
+		service.mu.Unlock()
+		if waiters == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("refresh waiters = %d, want %d", waiters, want)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// Search-as-you-type aborts the request for every superseded prefix. Their
+// refreshes must not keep consuming the provider's rate limit, and their
+// cancellation is no provider failure that suspends other refreshes.
+func TestRefreshesAbandonedByEveryRequestAreCancelledWithoutCooldown(t *testing.T) {
+	store, _ := newTestStore(t)
+	source := &blockingSource{
+		fakeSource: &fakeSource{games: []SourceGame{witcher}, known: searchable},
+		release:    make(chan struct{}),
+		started:    make(chan context.Context, 2),
+	}
+	service := newTestService(store, source, testPolicy)
+	t.Cleanup(func() { service.Stop(); service.Wait() })
+
+	first, cancelFirst := context.WithCancel(t.Context())
+	second, cancelSecond := context.WithCancel(t.Context())
+	firstErr := searchInBackground(service, first, "witcher 3")
+	secondErr := searchInBackground(service, second, "witcher 3")
+	waitForWaiters(t, service, "witcher 3", 2)
+	var providerCtx context.Context
+	select {
+	case providerCtx = <-source.started:
+	case <-time.After(time.Second):
+		t.Fatal("refresh did not reach the provider")
+	}
+	cancelFirst()
+	assertErrorIs(t, <-firstErr, context.Canceled)
+	if providerCtx.Err() != nil {
+		t.Fatal("refresh was cancelled while another request was waiting")
+	}
+	cancelSecond()
+	assertErrorIs(t, <-secondErr, context.Canceled)
+	select {
+	case <-providerCtx.Done():
+		assertErrorIs(t, providerCtx.Err(), context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("provider context stayed active after the last caller cancelled")
+	}
+	service.Wait()
+
+	close(source.release)
+	assertTitles(t, hitTitles(searchPage(t, service, SearchRequest{Query: "witcher 3"}).Hits), witcher.Title)
+	if source.searches.Load() != 2 {
+		t.Fatalf("provider searches = %d, want a new refresh after the abandoned one", source.searches.Load())
+	}
+}
+
+// A request that stops waiting because its wait budget ran out still wants
+// the result, so the refresh continues even when a later waiter aborts.
+func TestTimedOutWaitersKeepTheirRefreshRunning(t *testing.T) {
+	store, _ := newTestStore(t)
+	source := &blockingSource{fakeSource: &fakeSource{games: []SourceGame{witcher}, known: searchable}, release: make(chan struct{})}
+	policy := testPolicy
+	policy.Wait = 20 * time.Millisecond
+	service := newTestService(store, source, policy)
+	t.Cleanup(service.Wait)
+
+	_, err := service.Search(t.Context(), SearchRequest{Query: "witcher 3", Limit: 20})
+	assertErrorIs(t, err, ErrUnavailable)
+	query, err := newLocalQuery(SearchRequest{Query: "witcher 3", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := service.start(t.Context(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.leave(query.key, call, true)
+
+	close(source.release)
+	service.Wait()
+	assertTitles(t, hitTitles(searchPage(t, service, SearchRequest{Query: "witcher 3"}).Hits), witcher.Title)
+	if source.searches.Load() != 1 {
+		t.Fatalf("provider searches = %d, want the original refresh to finish", source.searches.Load())
 	}
 }
 

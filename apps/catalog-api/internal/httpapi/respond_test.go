@@ -48,3 +48,19 @@ func TestCatalogErrorsMapToContractResponses(t *testing.T) {
 		}
 	})
 }
+
+func TestSearchRetryAfterIsOnlySentForAPendingRefresh(t *testing.T) {
+	const path = "/games?query=zelda"
+	pending := newTestHandler(testToken, &fakeCatalog{err: fmt.Errorf("%w: %w", catalog.ErrUnavailable, catalog.ErrRefreshPending)})
+	response := serve(pending, http.MethodGet, path, "")
+	assertError(t, response, http.StatusServiceUnavailable, "unavailable")
+	if response.Header().Get("Retry-After") != "1" {
+		t.Fatal("pending refresh must advertise a retry")
+	}
+
+	unavailable := newTestHandler(testToken, &fakeCatalog{err: catalog.ErrUnavailable})
+	response = serve(unavailable, http.MethodGet, path, "")
+	if response.Header().Get("Retry-After") != "" {
+		t.Fatal("provider failure must not advertise a pending refresh")
+	}
+}

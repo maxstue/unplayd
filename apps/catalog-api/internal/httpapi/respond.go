@@ -27,6 +27,9 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, messag
 // fail translates catalog errors into the contract's error responses.
 func (a api) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, catalog.ErrRefreshPending):
+		w.Header().Set("Retry-After", "1")
+		writeError(w, r, http.StatusServiceUnavailable, "unavailable", "Search results are still loading.")
 	case errors.Is(err, catalog.ErrUnavailable):
 		a.logger.WarnContext(r.Context(), "catalog request unavailable", "error", err.Error())
 		writeError(w, r, http.StatusServiceUnavailable, "unavailable", "The game provider is unavailable. Try again later.")

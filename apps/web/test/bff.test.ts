@@ -886,6 +886,21 @@ it("suggests games through the catalog route without touching user data", async 
   expect(requests()[0]?.headers.get("Authorization")).toBe("Bearer " + config.catalogServiceToken);
 });
 
+it.each(["/api/games", "/api/games/suggestions"])(
+  "forwards the pending search retry hint on %s",
+  async (path) => {
+    fetcher
+      .mockResolvedValueOnce(Response.json({}, { status: 503, headers: { "Retry-After": "1" } }))
+      .mockResolvedValueOnce(Response.json({}, { status: 503 }));
+    const pending = await send(path + "?query=Hollow");
+    expect(pending.status).toBe(503);
+    expect(pending.headers.get("Retry-After")).toBe("1");
+    const unavailable = await send(path + "?query=Hollow");
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.headers.has("Retry-After")).toBe(false);
+  },
+);
+
 it("rejects invalid and signed-out suggestion requests before calling the catalog", async () => {
   for (const query of [
     "",

@@ -7,6 +7,49 @@ type FetchPage = (
   signal: AbortSignal,
 ) => Promise<CatalogPage>;
 
+// Each attempt can spend two seconds waiting for the same catalog refresh.
+// Seven retries with a one-second delay cover its twenty-second deadline.
+const searchRetryLimit = 7;
+
+function isPendingSearch(error: unknown) {
+  return (
+    error instanceof Error &&
+    "response" in error &&
+    error.response instanceof Response &&
+    error.response.status === 503 &&
+    error.response.headers.get("Retry-After") === "1"
+  );
+}
+
+async function waitForSearchRetry(signal: AbortSignal) {
+  signal.throwIfAborted();
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(finish, 1000);
+    function finish() {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal.addEventListener("abort", finish, { once: true });
+  });
+  signal.throwIfAborted();
+}
+
+async function fetchSearchPage(fetchPage: FetchPage, term: string, signal: AbortSignal) {
+  let retries = 0;
+  for (;;) {
+    try {
+      return await fetchPage(term, null, signal);
+    } catch (error) {
+      if (!isPendingSearch(error) || retries === searchRetryLimit) {
+        throw error;
+      }
+      retries++;
+      await waitForSearchRetry(signal);
+    }
+  }
+}
+
 /**
  * Debounced, cancellable catalog search with cursor pagination. Stale responses never replace newer
  * ones, and results are de-duplicated by game ID.
@@ -46,6 +89,7 @@ export function useGameSearch(
       return;
     }
     controller = new AbortController();
+    const signal = controller.signal;
     if (append) {
       loadingMore.value = true;
     } else {
@@ -53,7 +97,9 @@ export function useGameSearch(
     }
     moreError.value = false;
     try {
-      const page = await fetchPage(term, append ? nextCursor.value : null, controller.signal);
+      const page = append
+        ? await fetchPage(term, nextCursor.value, signal)
+        : await fetchSearchPage(fetchPage, term, signal);
       // Some transports resolve after abort; they must never replace newer results.
       if (current !== generation) {
         return;

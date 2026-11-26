@@ -42,7 +42,7 @@ export function searchGames(event: H3Event, config: ServicesConfig, fetcher?: ty
           () => s.catalog.GET("/games", { params: { query } }),
           "catalog",
           s.requestId,
-          { signal: s.signal },
+          { signal: s.signal, searchEvent: event },
         )
       ).data;
       return withLibraryState(page, event, config, s, fetcher);
@@ -95,7 +95,7 @@ export function suggestGames(event: H3Event, config: ServicesConfig, fetcher?: t
           () => s.catalog.GET("/games/suggestions", { params: { query } }),
           "catalog",
           s.requestId,
-          { signal: s.signal },
+          { signal: s.signal, searchEvent: event },
         )
       ).data;
     },

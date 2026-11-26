@@ -32,7 +32,8 @@ func DefaultSearchPolicy() SearchPolicy {
 }
 
 var (
-	errRefreshPending  = errors.New("provider refresh still running")
+	// ErrRefreshPending marks a search with no stored results whose refresh is still running.
+	ErrRefreshPending  = errors.New("provider refresh still running")
 	errCoolingDown     = errors.New("provider refreshes are suspended after a failure")
 	errRefreshCapacity = errors.New("provider refresh capacity reached")
 )
@@ -50,15 +51,25 @@ type Service struct {
 
 	mu            sync.Mutex
 	inflight      map[string]*refreshCall
+	active        int
 	coolingUntil  time.Time
 	refreshesDone sync.WaitGroup
 	stopping      bool
 }
 
+// refreshCall is one provider refresh shared by every request for the same
+// search. waiters, kept and abandoned are guarded by Service.mu.
 type refreshCall struct {
 	done   chan struct{}
 	err    error
 	cancel context.CancelFunc
+	// waiters counts the requests currently waiting for the result.
+	waiters int
+	// kept records that a request stopped waiting without aborting, so the
+	// result is still wanted by the next request for the search.
+	kept bool
+	// abandoned records that every waiter aborted and the refresh was cancelled.
+	abandoned bool
 }
 
 // NewService returns a catalog service. A nil importer answers every search
@@ -93,7 +104,7 @@ func (s *Service) Search(ctx context.Context, request SearchRequest) (SearchPage
 	}
 	if providerErr != nil {
 		if len(hits) == 0 {
-			return SearchPage{}, fmt.Errorf("%w: %v", ErrUnavailable, providerErr)
+			return SearchPage{}, fmt.Errorf("%w: %w", ErrUnavailable, providerErr)
 		}
 		s.logger.WarnContext(ctx, "search answered from stored games without provider refresh", "error", providerErr.Error())
 	}
@@ -149,12 +160,35 @@ func (s *Service) refresh(ctx context.Context, query localQuery) (providerErr, e
 	defer timer.Stop()
 	select {
 	case <-call.done:
+		s.leave(query.key, call, false)
 		return call.err, nil
 	case <-timer.C:
-		return errRefreshPending, nil
+		s.leave(query.key, call, false)
+		return ErrRefreshPending, nil
 	case <-ctx.Done():
+		s.leave(query.key, call, true)
 		return nil, ctx.Err()
 	}
+}
+
+// leave ends one request's wait for call. A refresh whose waiters all aborted
+// before any of them timed out is cancelled: search-as-you-type abandons a
+// request per superseded prefix, and those refreshes would otherwise keep
+// consuming the provider's rate limit ahead of the search the user wants.
+func (s *Service) leave(key string, call *refreshCall, aborted bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	call.waiters--
+	if !aborted {
+		call.kept = true
+		return
+	}
+	if call.waiters > 0 || call.kept || s.inflight[key] != call {
+		return
+	}
+	call.abandoned = true
+	delete(s.inflight, key)
+	call.cancel()
 }
 
 // start joins the running refresh of the same search or starts a new one,
@@ -165,30 +199,40 @@ func (s *Service) start(ctx context.Context, query localQuery) (*refreshCall, er
 	if s.stopping {
 		return nil, context.Canceled
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if call, ok := s.inflight[query.key]; ok {
+		call.waiters++
 		return call, nil
 	}
 	if s.now().Before(s.coolingUntil) {
 		return nil, errCoolingDown
 	}
-	if len(s.inflight) >= s.policy.MaxConcurrentRefreshes {
+	if s.active >= s.policy.MaxConcurrentRefreshes {
 		return nil, errRefreshCapacity
 	}
 	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.policy.RefreshTimeout)
-	call := &refreshCall{done: make(chan struct{}), cancel: cancel}
+	call := &refreshCall{done: make(chan struct{}), cancel: cancel, waiters: 1}
 	s.inflight[query.key] = call
+	s.active++
 	s.refreshesDone.Add(1)
 	go func() {
 		defer s.refreshesDone.Done()
 		defer cancel()
 		call.err = s.fetch(refreshCtx, query)
 		s.mu.Lock()
-		delete(s.inflight, query.key)
-		if call.err != nil {
+		s.active--
+		if s.inflight[query.key] == call {
+			delete(s.inflight, query.key)
+		}
+		// A cancelled abandoned refresh says nothing about the provider's health.
+		failed := call.err != nil && !call.abandoned
+		if failed {
 			s.coolingUntil = s.now().Add(s.policy.Cooldown)
 		}
 		s.mu.Unlock()
-		if call.err != nil {
+		if failed {
 			s.logger.WarnContext(refreshCtx, "provider search refresh failed", "error", call.err.Error(), "cooldown", s.policy.Cooldown.String())
 		}
 		close(call.done)

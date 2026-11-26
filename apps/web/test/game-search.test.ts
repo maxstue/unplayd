@@ -141,6 +141,41 @@ describe("catalog search lifecycle", () => {
     expect(search.items.value).toEqual([]);
   });
 
+  it("keeps loading while a cold search refreshes and then shows results", async () => {
+    const pending = Object.assign(new Error("Search still running"), {
+      response: new Response(null, { status: 503, headers: { "Retry-After": "1" } }),
+    });
+    const fetcher = vi
+      .fn<Parameters<typeof useGameSearch>[2]>()
+      .mockRejectedValueOnce(pending)
+      .mockResolvedValueOnce(page("Hollow Knight"));
+    const { query, search } = setup(fetcher);
+    query.value = "Hollow";
+    await vi.advanceTimersByTimeAsync(300);
+    expect(search.status.value).toBe("loading");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(search.items.value[0]?.game.id).toBe("Hollow Knight");
+    expect(search.status.value).toBe("success");
+  });
+
+  it("cancels a pending retry when input changes", async () => {
+    const pending = Object.assign(new Error("Search still running"), {
+      response: new Response(null, { status: 503, headers: { "Retry-After": "1" } }),
+    });
+    const fetcher = vi
+      .fn<Parameters<typeof useGameSearch>[2]>()
+      .mockRejectedValueOnce(pending)
+      .mockResolvedValueOnce(page("Hades"));
+    const { query, search } = setup(fetcher);
+    query.value = "Hollow";
+    await vi.advanceTimersByTimeAsync(300);
+    query.value = "Hades";
+    await vi.advanceTimersByTimeAsync(1300);
+    expect(fetcher.mock.calls.map(([term]) => term)).toEqual(["Hollow", "Hades"]);
+    expect(search.items.value[0]?.game.id).toBe("Hades");
+  });
+
   it("cancels scheduled and in-flight work when leaving the page", async () => {
     const fetcher = vi
       .fn<Parameters<typeof useGameSearch>[2]>()

@@ -1,5 +1,5 @@
 import { createError, type H3Event } from "h3";
-import { retryAfterSeconds } from "../../shared/http";
+import { retryAfterSeconds } from "#shared/http";
 import { requireSession } from "../auth/session";
 import { createCatalogClient } from "./catalog";
 import { createUserClient } from "./user";

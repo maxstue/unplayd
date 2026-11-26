@@ -1,6 +1,6 @@
 import { onScopeDispose, ref, shallowRef, watch, type Ref } from "vue";
-import type { CatalogPage, SearchHit } from "../../shared/catalog";
-import { retryAfterSeconds } from "../../shared/http";
+import type { CatalogPage, SearchHit } from "#shared/catalog";
+import { retryAfterSeconds } from "#shared/http";
 
 type FetchPage = (
   query: string,

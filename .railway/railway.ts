@@ -18,14 +18,17 @@ const source = (rootDirectory?: string) =>
 // Railway's default policy, stated explicitly: crashed containers restart, a crash loop stops.
 const restart = { restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 10 } as const;
 
+// Railway's private network and healthchecks use IPv6; "::" also accepts IPv4.
+const host = "::";
+
 export default defineRailway(() => {
   const db = postgres("postgres");
   const privateHost = "${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{postgres.PGDATABASE}}";
 
   const catalogApi = service("catalog-api", {
     source: source("apps/catalog-api"),
+    // Railway builds the Dockerfile in the root directory; it stores no explicit builder for it.
     build: {
-      builder: "DOCKERFILE",
       // The image only contains apps/catalog-api; contracts are verified in CI, not built in.
       watchPatterns: ["/apps/catalog-api/**"],
     },
@@ -47,15 +50,13 @@ export default defineRailway(() => {
 
   const userApi = service("user-api", {
     source: source("apps/user-api"),
-    build: {
-      builder: "DOCKERFILE",
-      watchPatterns: ["/apps/user-api/**"],
-    },
+    build: { watchPatterns: ["/apps/user-api/**"] },
     preDeploy: "/app/bin/user-api migrate",
     deploy: { preDeployTimeoutSeconds: 300, ...restart },
     healthcheck: "/health/live",
     healthcheckTimeout: 120,
     env: {
+      HOST: host,
       PORT: String(ports.userApi),
       DATABASE_URL: `jdbc:postgresql://${privateHost}?currentSchema=user_data&sslmode=require`,
       DATABASE_USER: "user_api",
@@ -89,6 +90,7 @@ export default defineRailway(() => {
     healthcheck: "/api/health",
     healthcheckTimeout: 60,
     env: {
+      HOST: host,
       PORT: String(ports.web),
       NUXT_APP_ORIGIN: "https://${{RAILWAY_PUBLIC_DOMAIN}}",
       NUXT_USER_API_URL: `http://\${{user-api.RAILWAY_PRIVATE_DOMAIN}}:${ports.userApi}`,

@@ -54,10 +54,12 @@ fun main(args: Array<String>) {
     require(args.isEmpty()) { "Usage: user-api [migrate [targetVersion]]" }
     val port = System.getenv("PORT")?.let { requireNotNull(it.toIntOrNull()) { "PORT must be an integer" } } ?: 8445
     require(port in 1..65535) { "PORT must be between 1 and 65535" }
+    // "::" accepts IPv4 and IPv6, as Railway's private network and healthchecks require.
+    val host = System.getenv("HOST")?.takeIf { it.isNotBlank() } ?: "0.0.0.0"
     database.dataSource().use { dataSource ->
         val users = JdbcUserStore(dataSource)
         val library = LibraryService(JdbcLibraryStore(dataSource), HttpCatalogClient(CatalogConfig.load()))
-        embeddedServer(Netty, host = "0.0.0.0", port = port) {
+        embeddedServer(Netty, host = host, port = port) {
             module(users = users, library = library)
         }.start(wait = true)
     }

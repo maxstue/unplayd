@@ -3,8 +3,11 @@
 # Idempotent and independent of the database name, so the same script serves the
 # local Compose/Testcontainers init and the Railway bootstrap (infra/railway/bootstrap-db.sh).
 set -euo pipefail
-psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --no-psqlrc --set=ON_ERROR_STOP=1 \
-  --set=user_password="$USER_API_DB_PASSWORD" --set=catalog_password="$CATALOG_DB_PASSWORD" <<'SQL'
+export USER_API_DB_PASSWORD="${USER_API_DB_PASSWORD:?required}" CATALOG_DB_PASSWORD="${CATALOG_DB_PASSWORD:?required}"
+psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --no-psqlrc --set=ON_ERROR_STOP=1 <<'SQL'
+\getenv user_password USER_API_DB_PASSWORD
+\getenv catalog_password CATALOG_DB_PASSWORD
+BEGIN;
 SELECT format('CREATE ROLE %I LOGIN', role)
 FROM unnest(ARRAY['user_api', 'catalog']) AS role
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role) \gexec
@@ -20,4 +23,5 @@ ALTER ROLE user_api SET search_path = user_data;
 ALTER ROLE catalog SET search_path = catalog;
 -- Only superusers may create extensions here; the catalog title search index needs trigrams.
 CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA catalog;
+COMMIT;
 SQL

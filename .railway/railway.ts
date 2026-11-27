@@ -2,7 +2,7 @@
 // Only web gets a public domain; the backends and the database are reachable over the
 // private network only. Secrets use preserve() and are set in Railway, never here.
 // Workflow: `railway config plan`, review, then `railway config apply` (runbook: Unplayd Operations in Linear).
-import { defineRailway, github, group, postgres, preserve, project, service } from "railway/iac";
+import { database, defineRailway, github, group, preserve, project, service } from "railway/iac";
 
 const repository = "maxstue/unplayd";
 const ports = { web: 8444, userApi: 8445, catalogApi: 8446 } as const;
@@ -22,7 +22,11 @@ const restart = { restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 10 }
 const host = "::";
 
 export default defineRailway(() => {
-  const db = postgres("postgres");
+  // The postgres() helper adds a public TCP proxy when creating a database.
+  const db = database("postgres", "private", {
+    image: "ghcr.io/railwayapp-templates/postgres-ssl:18",
+    defaultMountPath: "/var/lib/postgresql/data",
+  });
   const privateHost = "${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{postgres.PGDATABASE}}";
 
   const catalogApi = service("catalog-api", {
@@ -76,7 +80,6 @@ export default defineRailway(() => {
       dockerfilePath: "apps/web/Dockerfile",
       watchPatterns: [
         "/apps/web/**",
-        "/contracts/**",
         "/package.json",
         "/pnpm-lock.yaml",
         "/pnpm-workspace.yaml",

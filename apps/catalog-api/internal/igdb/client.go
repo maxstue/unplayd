@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand/v2"
 	"net/http"
 	"net/url"
@@ -34,6 +35,8 @@ const (
 	maxOpenRequests = 8
 	// Tokens are renewed this long before Twitch reports their expiry.
 	tokenRenewalMargin = time.Minute
+	// providerCallMessage is the log message of every IGDB call.
+	providerCallMessage = "provider call"
 )
 
 var (
@@ -67,6 +70,7 @@ type Client struct {
 	open       chan struct{}
 	rate       *limiter
 	now        func() time.Time
+	logger     *slog.Logger
 
 	// tokenLock is a context-aware mutex guarding token and tokenExpiry.
 	tokenLock   chan struct{}
@@ -89,6 +93,7 @@ func NewClient(config Config) (*Client, error) {
 		open:       make(chan struct{}, maxOpenRequests),
 		rate:       &limiter{interval: requestInterval},
 		now:        time.Now,
+		logger:     slog.Default(),
 		tokenLock:  make(chan struct{}, 1),
 	}, nil
 }
@@ -251,17 +256,64 @@ func mapGame(game igdbGame) (catalog.SourceGame, bool) {
 	return mapped, true
 }
 
-// post sends an Apicalypse query, retrying transient failures and renewing a
-// rejected token once. Cancellation of ctx stops immediately.
+// post sends an Apicalypse query and writes one log entry per call with its
+// duration, attempts, last HTTP status and outcome. The query is left out
+// because it carries user search text.
 func (c *Client) post(ctx context.Context, endpoint, query string) ([]byte, error) {
+	started := time.Now()
+	call := providerCall{}
+	body, err := c.postWithRetries(ctx, endpoint, query, &call)
+	logger := c.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	attrs := []any{"provider", source, "endpoint", strings.TrimPrefix(endpoint, c.apiURL),
+		"attempts", call.attempts, "status", call.status, "durationMs", time.Since(started).Milliseconds()}
+	switch {
+	case err == nil:
+		logger.InfoContext(ctx, providerCallMessage, append(attrs, "outcome", "ok")...)
+	case ctx.Err() != nil:
+		logger.InfoContext(ctx, providerCallMessage, append(attrs, "outcome", "cancelled")...)
+	default:
+		logger.WarnContext(ctx, providerCallMessage, append(attrs, "outcome", callOutcome(err), "error", err.Error())...)
+	}
+	return body, err
+}
+
+// providerCall collects what post logs about a call.
+type providerCall struct {
+	attempts int
+	// status is the last HTTP status IGDB answered with, 0 without any answer.
+	status int
+}
+
+// callOutcome classifies a failed provider call for logs.
+func callOutcome(err error) string {
+	switch {
+	case errors.Is(err, ErrCredentials):
+		return "credentials"
+	case errors.Is(err, ErrRejected):
+		return "rejected"
+	default:
+		return "unavailable"
+	}
+}
+
+// postWithRetries sends an Apicalypse query, retrying transient failures and
+// renewing a rejected token once. Cancellation of ctx stops immediately.
+func (c *Client) postWithRetries(ctx context.Context, endpoint, query string, call *providerCall) ([]byte, error) {
 	renewed := false
 	for attempt := 1; ; attempt++ {
+		call.attempts++
 		token, err := c.accessToken(ctx)
 		var body []byte
 		var status int
 		var retryAfter time.Duration
 		if err == nil {
 			status, body, retryAfter, err = c.send(ctx, endpoint, query, token)
+		}
+		if status != 0 {
+			call.status = status
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

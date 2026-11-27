@@ -53,6 +53,51 @@
         "security": []
       }
     },
+    "/health/ready": {
+      "get": {
+        "operationId": "getUserReadiness",
+        "summary": "Readiness: process and own database",
+        "description": "Answers 200 when the database answers within one second and 503 otherwise. Needs no authentication.",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./common.json#/components/schemas/Readiness"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./common.json#/components/schemas/Readiness"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
     "/library": {
       "get": {
         "operationId": "listLibrary",

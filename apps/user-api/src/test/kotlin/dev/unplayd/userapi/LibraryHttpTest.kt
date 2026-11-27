@@ -2,6 +2,7 @@ package dev.unplayd.userapi
 
 import dev.unplayd.userapi.auth.AuthConfig
 import dev.unplayd.userapi.catalog.HttpCatalogClient
+import dev.unplayd.userapi.health.readiness
 import dev.unplayd.userapi.identity.JdbcUserStore
 import dev.unplayd.userapi.library.JdbcLibraryStore
 import dev.unplayd.userapi.library.LibraryEntry
@@ -774,6 +775,7 @@ class LibraryHttpTest {
                             users,
                             auth.verifier(tokens.provider),
                             LibraryService(JdbcLibraryStore(database.dataSource), HttpCatalogClient(catalog.config()), picker::pick),
+                            database.dataSource.readiness(),
                         )
                     }
                     block(Fixture(database, catalog, picker))

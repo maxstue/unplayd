@@ -1,5 +1,6 @@
 import { createError, type H3Event } from "h3";
 import { retryAfterSeconds } from "#shared/http";
+import { log, safeRequestId } from "../log";
 import { requireSession } from "../auth/session";
 import { createCatalogClient } from "./catalog";
 import { createUserClient } from "./user";
@@ -38,17 +39,21 @@ interface UpstreamOptions {
   onRetryAfter?: (seconds: number) => void;
 }
 
-function reportUpstreamFailure(
+type UpstreamOutcome = "ok" | "timeout" | "transport" | "parsing" | "http";
+
+function reportUpstream(
   service: "user" | "catalog",
   requestId: string,
-  category: "timeout" | "transport" | "parsing" | "http",
+  startedAt: number,
+  outcome: UpstreamOutcome,
   status: number | null = null,
 ) {
-  console.warn("upstream_failure", {
-    requestId: /^[a-zA-Z0-9_-]{1,64}$/.test(requestId) ? requestId : "unknown",
+  log(outcome === "ok" ? "INFO" : "WARN", "upstream call", {
+    requestId: safeRequestId(requestId),
     service,
-    category,
+    outcome,
     status,
+    durationMs: Math.round(performance.now() - startedAt),
   });
 }
 
@@ -56,23 +61,25 @@ function reportUpstreamException(
   cause: unknown,
   service: "user" | "catalog",
   requestId: string,
+  startedAt: number,
   signal?: AbortSignal,
 ) {
   if (signal?.aborted || (cause instanceof Error && cause.name === "AbortError")) {
     return;
   }
-  let category: "timeout" | "transport" | "parsing" = "transport";
+  let outcome: UpstreamOutcome = "transport";
   if (cause instanceof Error && cause.name === "TimeoutError") {
-    category = "timeout";
+    outcome = "timeout";
   } else if (cause instanceof SyntaxError) {
-    category = "parsing";
+    outcome = "parsing";
   }
-  reportUpstreamFailure(service, requestId, category);
+  reportUpstream(service, requestId, startedAt, outcome);
 }
 
 /**
  * Runs an openapi-fetch call and maps transport, HTTP and parsing failures to {@link publicError}s.
- * Failures are logged without request or response bodies.
+ * Every call is logged as one `upstream call` entry with outcome, status and duration, never with
+ * request or response bodies. Calls aborted by the client are not logged.
  *
  * @param task - The client call, e.g. `() => user.GET("/me")`.
  * @param service - Which upstream is called, used for logging and the default allowed statuses.
@@ -87,11 +94,12 @@ export async function upstream<T>(
   requestId: string,
   { allowEmpty = false, signal, allowedStatuses, onRetryAfter }: UpstreamOptions = {},
 ) {
+  const startedAt = performance.now();
   let result;
   try {
     result = await task();
   } catch (cause) {
-    reportUpstreamException(cause, service, requestId, signal);
+    reportUpstreamException(cause, service, requestId, startedAt, signal);
     throw publicError(503, requestId);
   }
   if (!result.response.ok) {
@@ -99,19 +107,21 @@ export async function upstream<T>(
     if (onRetryAfter && status === 503) {
       const seconds = retryAfterSeconds(result.response.headers);
       if (seconds !== undefined) {
+        reportUpstream(service, requestId, startedAt, "http", status);
         onRetryAfter(seconds);
         throw publicError(503, requestId);
       }
     }
     const allowed =
       allowedStatuses ?? (service === "user" ? [400, 401, 403, 404, 409] : [400, 404, 409]);
-    reportUpstreamFailure(service, requestId, "http", status);
+    reportUpstream(service, requestId, startedAt, "http", status);
     throw publicError(allowed.includes(status) ? status : 503, requestId);
   }
   if (!allowEmpty && (result.data === undefined || result.data === null)) {
-    reportUpstreamFailure(service, requestId, "parsing", result.response.status);
+    reportUpstream(service, requestId, startedAt, "parsing", result.response.status);
     throw publicError(503, requestId);
   }
+  reportUpstream(service, requestId, startedAt, "ok", result.response.status);
   return { data: result.data as T, status: result.response.status };
 }
 

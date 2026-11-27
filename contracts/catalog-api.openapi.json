@@ -53,6 +53,51 @@
         "security": []
       }
     },
+    "/health/ready": {
+      "get": {
+        "operationId": "getCatalogReadiness",
+        "summary": "Readiness: process and own database",
+        "description": "Answers 200 when the database answers within one second and 503 otherwise. Needs no authentication.",
+        "parameters": [
+          {
+            "$ref": "./common.json#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./common.json#/components/schemas/Readiness"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "headers": {
+              "X-Request-ID": {
+                "$ref": "./common.json#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./common.json#/components/schemas/Readiness"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
     "/games": {
       "get": {
         "operationId": "searchGames",
@@ -158,7 +203,10 @@
               },
               "Retry-After": {
                 "description": "Delay in seconds before retrying the same search. Present when the refresh is still running and the catalog has no stored matches.",
-                "schema": { "type": "integer", "minimum": 1 }
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
               }
             },
             "content": {

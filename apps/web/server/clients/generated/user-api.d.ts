@@ -21,6 +21,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readiness: process and own database
+         * @description Answers 200 when the database answers within one second and 503 otherwise. Needs no authentication.
+         */
+        get: operations["getUserReadiness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/library": {
         parameters: {
             query?: never;
@@ -372,6 +392,17 @@ export interface components {
                 requestId: components["schemas"]["RequestId"];
             };
         };
+        /** @description Readiness of the service. Only the service's own database is checked; catalog and IGDB outages never make a service unready. */
+        Readiness: {
+            /** @enum {string} */
+            status: "ok" | "unavailable";
+            /** @enum {string} */
+            service: "user-api" | "catalog-api";
+            checks: {
+                /** @enum {string} */
+                database: "ok" | "unavailable";
+            };
+        };
         /** @enum {string} */
         PlayStatus: "backlog" | "playing" | "paused" | "completed" | "dropped";
         /**
@@ -535,6 +566,39 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             503: components["responses"]["Unavailable"];
+        };
+    };
+    getUserReadiness: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-ID"?: components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ready */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Readiness"];
+                };
+            };
+            /** @description Database unavailable */
+            503: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Readiness"];
+                };
+            };
         };
     };
     listLibrary: {

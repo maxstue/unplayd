@@ -196,7 +196,7 @@ func (s *Store) runNextRefresh(ctx context.Context, importer *Importer, p Refres
 	if err != nil {
 		logger.Warn("refresh completion failed", "gameId", j.ID, "leaseLost", errors.Is(err, errLeaseLost))
 	} else {
-		logger.Info("catalog refresh", "gameId", j.ID, "attempt", j.Attempts, "result", outcome.code, "failed", outcome.terminal, "duration", time.Since(started), "nextRunAt", time.Now().Add(outcome.next), "claimId", j.Token)
+		logger.Info("catalog refresh", "gameId", j.ID, "attempt", j.Attempts, "result", outcome.code, "failed", outcome.terminal, "durationMs", time.Since(started).Milliseconds(), "nextRunAt", time.Now().Add(outcome.next), "claimId", j.Token)
 	}
 	return outcome.pause
 }

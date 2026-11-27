@@ -75,7 +75,7 @@ func main() {
 		}
 	}()
 	server := &http.Server{
-		Addr: ":" + port, Handler: httpapi.NewHandler(authConfig.Token(), games, slog.Default()),
+		Addr: ":" + port, Handler: httpapi.NewHandler(authConfig.Token(), games, db.PingContext, slog.Default()),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
 		WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second,
 	}

@@ -91,7 +91,7 @@ func newRouteFixture(t *testing.T) *routeFixture {
 	policy := catalog.SearchPolicy{FreshFor: time.Hour, Wait: 5 * time.Second, RefreshTimeout: 10 * time.Second, Cooldown: time.Minute}
 	service := catalog.NewService(store, catalog.NewImporter(provider, store), policy, slog.New(slog.DiscardHandler))
 	t.Cleanup(service.Wait)
-	return &routeFixture{db: db, provider: provider, handler: NewHandler(testToken, service, slog.New(slog.DiscardHandler))}
+	return &routeFixture{db: db, provider: provider, handler: NewHandler(testToken, service, db.PingContext, slog.New(slog.DiscardHandler))}
 }
 
 func (f *routeFixture) get(target string) *httptest.ResponseRecorder {

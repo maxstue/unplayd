@@ -7,6 +7,9 @@ import dev.unplayd.userapi.catalog.HttpCatalogClient
 import dev.unplayd.userapi.database.DatabaseConfig
 import dev.unplayd.userapi.database.dataSource
 import dev.unplayd.userapi.database.migrateDatabase
+import dev.unplayd.userapi.health.Readiness
+import dev.unplayd.userapi.health.healthRoutes
+import dev.unplayd.userapi.health.readiness
 import dev.unplayd.userapi.identity.JdbcUserStore
 import dev.unplayd.userapi.identity.MeResponse
 import dev.unplayd.userapi.identity.UserStore
@@ -14,6 +17,7 @@ import dev.unplayd.userapi.library.JdbcLibraryStore
 import dev.unplayd.userapi.library.LibraryProblem
 import dev.unplayd.userapi.library.LibraryService
 import dev.unplayd.userapi.library.libraryRoutes
+import dev.unplayd.userapi.logging.RequestLogging
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.auth.HttpAuthHeader
@@ -60,7 +64,7 @@ fun main(args: Array<String>) {
         val users = JdbcUserStore(dataSource)
         val library = LibraryService(JdbcLibraryStore(dataSource), HttpCatalogClient(CatalogConfig.load()))
         embeddedServer(Netty, host = host, port = port) {
-            module(users = users, library = library)
+            module(users = users, library = library, readiness = dataSource.readiness())
         }.start(wait = true)
     }
 }
@@ -100,6 +104,7 @@ fun Application.module(
     users: UserStore,
     verifier: JWTVerifier = auth.verifier(),
     library: LibraryService,
+    readiness: Readiness,
 ) {
     install(ContentNegotiation) { json() }
     install(CallId) {
@@ -108,6 +113,7 @@ fun Application.module(
         generate { UUID.randomUUID().toString() }
         replyToHeader("X-Request-ID")
     }
+    install(RequestLogging)
     intercept(ApplicationCallPipeline.Call) {
         call.response.header(HttpHeaders.CacheControl, "no-store")
     }
@@ -123,13 +129,15 @@ fun Application.module(
         }
         exception<Throwable> { call, cause ->
             if (cause is kotlinx.coroutines.CancellationException) throw cause
-            this@module.log.error(
-                "User API request failed (requestId={}, type={}, sqlState={}, stack={})",
-                call.callId,
-                cause::class.simpleName,
-                (cause as? java.sql.SQLException)?.sqlState,
-                cause.stackTrace.take(8).joinToString("; "),
-            )
+            // Messages are left out: they can echo SQL parameters or upstream details.
+            this@module
+                .log
+                .atError()
+                .addKeyValue("requestId", call.callId)
+                .addKeyValue("type", cause::class.simpleName)
+                .addKeyValue("sqlState", (cause as? java.sql.SQLException)?.sqlState)
+                .addKeyValue("stack", cause.stackTrace.take(8).joinToString("; "))
+                .log("request failed")
             call.respond(
                 HttpStatusCode.ServiceUnavailable,
                 errorResponse(message = "Service unavailable", status = 503, requestId = call.callId),
@@ -164,7 +172,7 @@ fun Application.module(
         }
     }
     routing {
-        get("/health/live") { call.respond(mapOf("status" to "ok", "service" to "user-api")) }
+        healthRoutes(readiness)
         authenticate("clerk") {
             libraryRoutes(users, library)
             get("/me") {

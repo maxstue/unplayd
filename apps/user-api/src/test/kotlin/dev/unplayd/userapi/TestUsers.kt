@@ -3,6 +3,7 @@ package dev.unplayd.userapi
 import com.auth0.jwt.interfaces.JWTVerifier
 import dev.unplayd.userapi.auth.AuthConfig
 import dev.unplayd.userapi.catalog.CatalogClient
+import dev.unplayd.userapi.health.Readiness
 import dev.unplayd.userapi.identity.LocalUser
 import dev.unplayd.userapi.identity.UserStore
 import dev.unplayd.userapi.library.AddLibraryEntry
@@ -116,6 +117,13 @@ internal fun Application.testModule(
     auth: AuthConfig,
     users: TestUsers,
     verifier: JWTVerifier,
+    readiness: Readiness = Readiness { true },
 ) {
-    module(auth, users, verifier, LibraryService(users.library, CatalogClient { _, _ -> error("Not used by identity tests") }))
+    module(
+        auth,
+        users,
+        verifier,
+        LibraryService(users.library, CatalogClient { _, _ -> error("Not used by identity tests") }),
+        readiness,
+    )
 }

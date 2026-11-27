@@ -80,6 +80,8 @@ export default defineRailway(() => {
       dockerfilePath: "apps/web/Dockerfile",
       watchPatterns: [
         "/apps/web/**",
+        // The generated contract types live in apps/web; rebuild when a contract changes.
+        "/contracts/**",
         "/package.json",
         "/pnpm-lock.yaml",
         "/pnpm-workspace.yaml",

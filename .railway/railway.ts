@@ -144,8 +144,8 @@ export default defineRailway(() => {
       // About six monthly backups; the newest one is always kept.
       RETENTION_DAYS: "183",
       KEEP_MIN: "1",
-      // Preview only until the first runs' logs are reviewed (runbook: Unplayd Operations).
-      DRY_RUN: "true",
+      // Preview reviewed on 28.11.2026 (found 1, expired 0, deleted 0); see QUEST-141.
+      DRY_RUN: "false",
     },
   });
 

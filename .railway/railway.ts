@@ -27,7 +27,6 @@ export default defineRailway(() => {
     preDeploy: "/migrate",
     deploy: { preDeployTimeoutSeconds: 300 },
     healthcheck: "/health/live",
-    healthcheckTimeout: 60,
     env: {
       PORT: String(ports.catalogApi),
       DATABASE_URL: `postgresql://${privateHost}?search_path=catalog&sslmode=require`,
@@ -45,7 +44,6 @@ export default defineRailway(() => {
     preDeploy: "/app/bin/user-api migrate",
     deploy: { preDeployTimeoutSeconds: 300 },
     healthcheck: "/health/live",
-    healthcheckTimeout: 120,
     env: {
       HOST: host,
       PORT: String(ports.userApi),
@@ -79,7 +77,6 @@ export default defineRailway(() => {
       ],
     },
     healthcheck: "/api/health",
-    healthcheckTimeout: 60,
     env: {
       HOST: host,
       PORT: String(ports.web),

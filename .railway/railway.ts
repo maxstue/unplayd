@@ -2,43 +2,30 @@
 // Only web gets a public domain; the backends and the database are reachable over the
 // private network only. Secrets use preserve() and are set in Railway, never here.
 // Workflow: `railway config plan`, review, then `railway config apply` (runbook: Unplayd Operations in Linear).
-import { database, defineRailway, github, group, preserve, project, service } from "railway/iac";
+import { defineRailway, github, group, postgres, preserve, project, service } from "railway/iac";
 
 const repository = "maxstue/unplayd";
 const ports = { web: 8444, userApi: 8445, catalogApi: 8446 } as const;
 
 // Deploy only after the GitHub checks of the commit (CI incl. the `quality` gate) succeeded.
 const source = (rootDirectory?: string) =>
-  github(repository, {
-    branch: "main",
-    checkSuites: true,
-    ...(rootDirectory ? { rootDirectory } : {}),
-  });
-
-// Railway's default policy, stated explicitly: crashed containers restart, a crash loop stops.
-const restart = { restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 10 } as const;
+  github(repository, { branch: "main", checkSuites: true, rootDirectory });
 
 // Railway's private network and healthchecks use IPv6; "::" also accepts IPv4.
 const host = "::";
 
 export default defineRailway(() => {
-  // The postgres() helper adds a public TCP proxy when creating a database.
-  const db = database("postgres", "private", {
-    image: "ghcr.io/railwayapp-templates/postgres-ssl:18",
-    defaultMountPath: "/var/lib/postgresql/data",
-  });
+  const db = postgres("postgres");
   const privateHost = "${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{postgres.PGDATABASE}}";
 
   const catalogApi = service("catalog-api", {
     source: source("apps/catalog-api"),
-    // Railway builds the Dockerfile in the root directory; it stores no explicit builder for it.
-    build: {
-      // The image only contains apps/catalog-api; contracts are verified in CI, not built in.
-      watchPatterns: ["/apps/catalog-api/**"],
-    },
+    // The Dockerfile in the root directory is used automatically. The image contains only
+    // apps/catalog-api, so only that directory triggers a deploy.
+    build: { watchPatterns: ["/apps/catalog-api/**"] },
     // Runs once per deployment in its own container, before the new version starts.
     preDeploy: "/migrate",
-    deploy: { preDeployTimeoutSeconds: 300, ...restart },
+    deploy: { preDeployTimeoutSeconds: 300 },
     healthcheck: "/health/live",
     healthcheckTimeout: 60,
     env: {
@@ -56,7 +43,7 @@ export default defineRailway(() => {
     source: source("apps/user-api"),
     build: { watchPatterns: ["/apps/user-api/**"] },
     preDeploy: "/app/bin/user-api migrate",
-    deploy: { preDeployTimeoutSeconds: 300, ...restart },
+    deploy: { preDeployTimeoutSeconds: 300 },
     healthcheck: "/health/live",
     healthcheckTimeout: 120,
     env: {
@@ -80,7 +67,7 @@ export default defineRailway(() => {
       dockerfilePath: "apps/web/Dockerfile",
       watchPatterns: [
         "/apps/web/**",
-        // The generated contract types live in apps/web; rebuild when a contract changes.
+        // Web consumes both contracts (generated types in apps/web/server/clients/generated).
         "/contracts/**",
         "/package.json",
         "/pnpm-lock.yaml",
@@ -91,7 +78,6 @@ export default defineRailway(() => {
         "/apps/catalog-api/package.json",
       ],
     },
-    deploy: restart,
     healthcheck: "/api/health",
     healthcheckTimeout: 60,
     env: {

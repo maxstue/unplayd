@@ -1,8 +1,6 @@
 FROM eclipse-temurin:25.0.5.1_2-jdk AS build
 WORKDIR /app
-COPY gradlew settings.gradle.kts build.gradle.kts gradle.lockfile ./
-COPY gradle gradle
-COPY src src
+COPY . .
 RUN ./gradlew --no-daemon installDist
 
 FROM eclipse-temurin:25.0.5.1_2-jre

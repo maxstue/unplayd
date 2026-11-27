@@ -41,8 +41,7 @@
     "format:web": "vp run @unplayd/web#format",
     "db:down": "infisical run --env=dev --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose down",
     "local:up": "vp run db:up && vp run db:migrate && infisical run --env=dev --path=/Web --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose --profile apps up --build --wait",
-    "local:down": "infisical run --env=dev --path=/Web --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose --profile apps down",
-    "railway:plan": "railway config plan"
+    "local:down": "infisical run --env=dev --path=/Web --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose --profile apps down"
   },
   "devDependencies": {
     "openapi-typescript": "7.13.0",

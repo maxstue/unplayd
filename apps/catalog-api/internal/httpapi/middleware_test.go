@@ -225,7 +225,7 @@ func TestRequestLogsCarryRequestIDWithoutCredentials(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(requestid.LogHandler{Handler: slog.NewJSONHandler(&logs, nil)})
 	token := rand.Text() + rand.Text()
-	handler := NewHandler(token, &fakeCatalog{err: errors.New("database down")}, logger)
+	handler := NewHandler(token, &fakeCatalog{err: errors.New("database down")}, func(context.Context) error { return nil }, logger)
 	req := httptest.NewRequest(http.MethodGet, "/games?query=zelda", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-Request-ID", "log_trace-42")

@@ -14,6 +14,10 @@ const source = (rootDirectory?: string) =>
 // Railway's private network and healthchecks use IPv6; "::" also accepts IPv4.
 const host = "::";
 
+// Railway probes the healthcheck only while a deployment starts, so the APIs use readiness:
+// a new version takes traffic only once it reaches its database. Readiness never checks IGDB.
+const readiness = "/health/ready";
+
 export default defineRailway(() => {
   const db = postgres("postgres");
   const privateHost = "${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{postgres.PGDATABASE}}";
@@ -26,7 +30,7 @@ export default defineRailway(() => {
     // Runs once per deployment in its own container, before the new version starts.
     preDeploy: "/migrate",
     deploy: { preDeployTimeoutSeconds: 300 },
-    healthcheck: "/health/live",
+    healthcheck: readiness,
     env: {
       PORT: String(ports.catalogApi),
       DATABASE_URL: `postgresql://${privateHost}?search_path=catalog&sslmode=require`,
@@ -43,7 +47,7 @@ export default defineRailway(() => {
     build: { watchPatterns: ["/apps/user-api/**"] },
     preDeploy: "/app/bin/user-api migrate",
     deploy: { preDeployTimeoutSeconds: 300 },
-    healthcheck: "/health/live",
+    healthcheck: readiness,
     env: {
       HOST: host,
       PORT: String(ports.userApi),

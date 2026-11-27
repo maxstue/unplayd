@@ -144,6 +144,7 @@ function requests() {
 
 beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.spyOn(console, "log").mockImplementation(() => {});
   config.serviceTimeoutMs = 1000;
   config.requestTimeoutMs = 5000;
   fetcher.mockReset().mockRejectedValue(new Error("Unexpected upstream"));

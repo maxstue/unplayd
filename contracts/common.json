@@ -71,6 +71,33 @@
       "PlayStatus": {
         "type": "string",
         "enum": ["backlog", "playing", "paused", "completed", "dropped"]
+      },
+      "Readiness": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Readiness of the service. Only the service's own database is checked; catalog and IGDB outages never make a service unready.",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ok", "unavailable"]
+          },
+          "service": {
+            "type": "string",
+            "enum": ["user-api", "catalog-api"]
+          },
+          "checks": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "database": {
+                "type": "string",
+                "enum": ["ok", "unavailable"]
+              }
+            },
+            "required": ["database"]
+          }
+        },
+        "required": ["status", "service", "checks"]
       }
     },
     "headers": {

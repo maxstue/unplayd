@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,48 @@ func TestLivenessReturnsServiceIdentity(t *testing.T) {
 	}
 	if body["status"] != "ok" || body["service"] != "catalog-api" {
 		t.Fatalf("unexpected health payload: %v", body)
+	}
+}
+
+func TestReadinessReflectsTheDatabaseWithoutServiceToken(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		code     int
+		status   string
+		database string
+	}{
+		{"database reachable", nil, http.StatusOK, "ok", "ok"},
+		{"database unreachable", errors.New("dial tcp 10.0.0.1:5432: connection refused"), http.StatusServiceUnavailable, "unavailable", "unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var deadline time.Time
+			handler := NewHandler(testToken, &fakeCatalog{}, func(ctx context.Context) error {
+				deadline, _ = ctx.Deadline()
+				return tc.err
+			}, slog.New(slog.DiscardHandler))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health/ready", nil))
+			if response.Code != tc.code {
+				t.Fatalf("status = %d, want %d", response.Code, tc.code)
+			}
+			if deadline.IsZero() || time.Until(deadline) > readinessTimeout {
+				t.Fatalf("readiness check is not bounded by %v", readinessTimeout)
+			}
+			var body struct {
+				Status, Service string
+				Checks          map[string]string
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Status != tc.status || body.Service != "catalog-api" || body.Checks["database"] != tc.database {
+				t.Fatalf("unexpected readiness payload: %s", response.Body)
+			}
+			if strings.Contains(response.Body.String(), "10.0.0.1") {
+				t.Fatal("readiness payload leaks database details")
+			}
+		})
 	}
 }
 
@@ -68,7 +111,7 @@ func (f *fakeCatalog) Batch(_ context.Context, ids []string) (catalog.Batch, err
 }
 
 func newTestHandler(token string, games Catalog) http.Handler {
-	return NewHandler(token, games, slog.New(slog.DiscardHandler))
+	return NewHandler(token, games, func(context.Context) error { return nil }, slog.New(slog.DiscardHandler))
 }
 
 const testToken = "test-service-token-with-at-least-32-bytes"

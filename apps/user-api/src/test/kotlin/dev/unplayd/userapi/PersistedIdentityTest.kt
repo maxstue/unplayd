@@ -65,6 +65,8 @@ class PersistedIdentityTest {
                             dev.unplayd.userapi.catalog
                                 .CatalogClient { _, _ -> error("Catalog is not used for identity reads") },
                         ),
+                        dev.unplayd.userapi.health
+                            .Readiness { true },
                     )
                 }
                 val own = client.get("/library/$game") { header(HttpHeaders.Authorization, "Bearer ${tokens.token(firstSubject)}") }

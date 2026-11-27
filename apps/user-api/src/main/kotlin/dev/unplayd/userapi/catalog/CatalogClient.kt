@@ -4,6 +4,7 @@ import dev.unplayd.userapi.library.LibraryProblem
 import kotlinx.coroutines.future.await
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.slf4j.LoggerFactory
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -76,10 +77,41 @@ class HttpCatalogClient(
             .followRedirects(HttpClient.Redirect.NEVER)
             .build()
     private val json = Json { ignoreUnknownKeys = true }
+    private val logger = LoggerFactory.getLogger(HttpCatalogClient::class.java)
 
+    /** Fetches a game and writes one entry with duration, status and outcome; never the token or body. */
     override suspend fun game(
         id: UUID,
         requestId: String,
+    ): CatalogGame {
+        val started = System.nanoTime()
+        var status: Int? = null
+        var outcome = "unavailable"
+        try {
+            return fetch(id, requestId) { status = it }.also { outcome = "ok" }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            outcome = "cancelled"
+            throw cancelled
+        } catch (problem: LibraryProblem) {
+            if (problem.status == 400) outcome = "unknown_game"
+            throw problem
+        } finally {
+            val entry = if (outcome == "unavailable") logger.atWarn() else logger.atInfo()
+            entry
+                .addKeyValue("requestId", requestId)
+                .addKeyValue("upstream", "catalog-api")
+                .addKeyValue("operation", "game")
+                .addKeyValue("status", status)
+                .addKeyValue("outcome", outcome)
+                .addKeyValue("durationMs", (System.nanoTime() - started) / 1_000_000)
+                .log("upstream call")
+        }
+    }
+
+    private suspend fun fetch(
+        id: UUID,
+        requestId: String,
+        onStatus: (Int) -> Unit,
     ): CatalogGame {
         val request =
             HttpRequest
@@ -98,6 +130,7 @@ class HttpCatalogClient(
             } catch (_: Exception) {
                 throw LibraryProblem(503, "Catalog unavailable")
             }
+        onStatus(response.statusCode())
         if (response.statusCode() == 404) throw LibraryProblem(400, "Unknown or inactive game")
         if (response.statusCode() != 200) throw LibraryProblem(503, "Catalog unavailable")
         val game =

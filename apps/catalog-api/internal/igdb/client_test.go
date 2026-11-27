@@ -1,11 +1,14 @@
 package igdb
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -381,6 +384,45 @@ func TestTransientFailuresAreRetriedWithinBounds(t *testing.T) {
 			}
 			if err != nil {
 				assertNoSecrets(t, err, fake)
+			}
+		})
+	}
+}
+
+func TestProviderCallsAreLoggedWithDurationAndOutcomeButNoQuery(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		handler  http.HandlerFunc
+		level    string
+		outcome  string
+		attempts float64
+		status   float64
+	}{
+		{"retried success", sequence(respond(http.StatusServiceUnavailable, ""), respond(http.StatusOK, `[]`)), "INFO", "ok", 2, 200},
+		{"persistent outage", respond(http.StatusServiceUnavailable, ""), "WARN", "unavailable", maxAttempts, 503},
+		{"rejected credentials", respond(http.StatusForbidden, ""), "WARN", "credentials", 1, 403},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake, client := newFakeIGDB(t, tc.handler)
+			var logs bytes.Buffer
+			client.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			_, _ = client.Search(t.Context(), "secret search text", catalog.SearchFilter{}, 1)
+			var entry map[string]any
+			if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
+				t.Fatalf("want exactly one JSON log entry, got %q: %v", logs.String(), err)
+			}
+			if entry["msg"] != "provider call" || entry["level"] != tc.level || entry["provider"] != "igdb" ||
+				entry["endpoint"] != "/games" || entry["outcome"] != tc.outcome ||
+				entry["attempts"] != tc.attempts || entry["status"] != tc.status {
+				t.Fatalf("unexpected provider log entry: %v", entry)
+			}
+			if _, ok := entry["durationMs"].(float64); !ok {
+				t.Fatalf("provider log entry has no duration: %v", entry)
+			}
+			for _, private := range []string{"secret search text", fake.clientSecret, issuedToken(1)} {
+				if strings.Contains(logs.String(), private) {
+					t.Fatalf("provider log leaks %q: %s", private, logs.String())
+				}
 			}
 		})
 	}

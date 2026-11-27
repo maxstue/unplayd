@@ -1,6 +1,7 @@
 <configuration>
+    <!-- One flat JSON object per line on stdout; key-value pairs become top-level fields. -->
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder><pattern>%d{ISO8601} %-5level %logger{36} - %msg%n</pattern></encoder>
+        <encoder class="dev.unplayd.userapi.logging.FlatJsonEncoder"/>
     </appender>
     <root level="INFO"><appender-ref ref="STDOUT"/></root>
 </configuration>

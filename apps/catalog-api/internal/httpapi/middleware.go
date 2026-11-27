@@ -19,9 +19,9 @@ const requestTimeout = 3 * time.Second
 
 var requestIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
-// isPublic reports whether r targets the only route that needs no service token.
+// isPublic reports whether r targets a health route, the only routes that need no service token.
 func isPublic(r *http.Request) bool {
-	return r.Method == http.MethodGet && r.URL.Path == "/health/live"
+	return r.Method == http.MethodGet && (r.URL.Path == "/health/live" || r.URL.Path == "/health/ready")
 }
 
 // withTimeout limits the request context to requestTimeout. A shorter
@@ -47,7 +47,7 @@ func withRequestID(next http.Handler) http.Handler {
 	})
 }
 
-// withLogging writes one entry per request. Liveness probes log at debug
+// withLogging writes one entry per request. Health probes log at debug
 // level. Query strings are left out because they can carry user input.
 func withLogging(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -65,8 +65,8 @@ func withLogging(logger *slog.Logger, next http.Handler) http.Handler {
 	})
 }
 
-// withAuth requires the service token on every route except liveness and
-// marks those responses as not cacheable.
+// withAuth requires the service token on every route except the health
+// routes and marks those responses as not cacheable.
 func withAuth(serviceToken string, next http.Handler) http.Handler {
 	expected := sha256.Sum256([]byte(serviceToken))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

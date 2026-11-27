@@ -15,7 +15,7 @@ application { mainClass.set("dev.unplayd.userapi.ApplicationKt") }
 dependencyLocking { lockAllConfigurations() }
 sourceSets.test { resources.srcDir(projectDir.resolve("../../infra/postgres").canonicalFile) }
 
-val ktorVersion = "3.6.1"
+val ktorVersion = "3.6.2"
 dependencies {
     implementation(platform("io.ktor:ktor-bom:$ktorVersion"))
     implementation("io.ktor:ktor-server-netty")
@@ -24,10 +24,10 @@ dependencies {
     implementation("io.ktor:ktor-server-auth-jwt")
     implementation("io.ktor:ktor-server-status-pages")
     implementation("io.ktor:ktor-server-call-id")
-    implementation("ch.qos.logback:logback-classic:1.6.6")
-    implementation("org.flywaydb:flyway-core:13.12.0")
-    implementation("org.flywaydb:flyway-database-postgresql:13.12.0")
-    implementation("org.postgresql:postgresql:42.7.14")
+    implementation("ch.qos.logback:logback-classic:1.6.8")
+    implementation("org.flywaydb:flyway-core:13.13.0")
+    implementation("org.flywaydb:flyway-database-postgresql:13.13.0")
+    implementation("org.postgresql:postgresql:42.7.15")
     implementation("com.zaxxer:HikariCP:7.1.0")
     testImplementation("io.ktor:ktor-server-test-host")
     testImplementation(kotlin("test-junit5"))

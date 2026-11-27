@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Superuser bootstrap for the service roles, schemas and extensions; run it before any migration.
 # Idempotent and independent of the database name, so the same script serves the
-# local Compose/Testcontainers init and the Railway bootstrap (infra/railway/bootstrap-db.sh).
+# local Compose/Testcontainers init and the one-time Railway bootstrap (Unplayd Operations runbook in Linear).
 set -euo pipefail
 export USER_API_DB_PASSWORD="${USER_API_DB_PASSWORD:?required}" CATALOG_DB_PASSWORD="${CATALOG_DB_PASSWORD:?required}"
 psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --no-psqlrc --set=ON_ERROR_STOP=1 <<'SQL'

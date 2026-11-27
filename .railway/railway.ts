@@ -113,8 +113,8 @@ export default defineRailway(() => {
 
   const backup = service("backup", {
     source: image(`ghcr.io/maxstue/postgres-s3-backups-cleanup-backup:${backupRelease}`),
-    // Daily at 02:30 UTC; the job runs once and exits.
-    deploy: { cronSchedule: "30 2 * * *", restartPolicyType: "NEVER" },
+    // Monthly on day 1 at 02:00 UTC, as in kijk; the job runs once and exits.
+    deploy: { cronSchedule: "0 2 1 * *", restartPolicyType: "NEVER" },
     env: {
       // Superuser URL over the private network: the dump covers user_data and catalog.
       BACKUP_DATABASE_URL: ref(db, "DATABASE_URL"),
@@ -132,8 +132,8 @@ export default defineRailway(() => {
 
   const backupCleanup = service("backup-cleanup", {
     source: image(`ghcr.io/maxstue/postgres-s3-backups-cleanup-cleanup:${backupRelease}`),
-    // Sundays at 03:30 UTC, after the daily backup.
-    deploy: { cronSchedule: "30 3 * * 0", restartPolicyType: "NEVER" },
+    // January and July on day 1 at 03:00 UTC, after that month's backup.
+    deploy: { cronSchedule: "0 3 1 1,7 *", restartPolicyType: "NEVER" },
     env: {
       ACCESS_KEY_ID: ref(backups, "ACCESS_KEY_ID"),
       SECRET_ACCESS_KEY: ref(backups, "SECRET_ACCESS_KEY"),
@@ -141,8 +141,9 @@ export default defineRailway(() => {
       ENDPOINT: ref(backups, "ENDPOINT"),
       REGION: "auto",
       AWS_S3_FORCE_PATH_STYLE: "true",
-      RETENTION_DAYS: "35",
-      KEEP_MIN: "7",
+      // About six monthly backups; the newest one is always kept.
+      RETENTION_DAYS: "183",
+      KEEP_MIN: "1",
       // Preview only until the first runs' logs are reviewed (runbook: Unplayd Operations).
       DRY_RUN: "true",
     },

@@ -13,6 +13,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import javax.sql.DataSource
 
+private const val SERVICE = "user-api"
+
 /** Time budget of the readiness database check. */
 const val READINESS_TIMEOUT_MS = 1_000L
 
@@ -46,10 +48,10 @@ data class HealthResponse(
  * requires the database and answers 503 without it. Both need no authentication.
  */
 fun Route.healthRoutes(readiness: Readiness) {
-    get("/health/live") { call.respond(HealthResponse("ok", "user-api")) }
+    get("/health/live") { call.respond(HealthResponse("ok", SERVICE)) }
     get("/health/ready") {
         if (readiness.databaseReady()) {
-            call.respond(HealthResponse("ok", "user-api", mapOf("database" to "ok")))
+            call.respond(HealthResponse("ok", SERVICE, mapOf("database" to "ok")))
         } else {
             application.log
                 .atWarn()
@@ -58,7 +60,7 @@ fun Route.healthRoutes(readiness: Readiness) {
                 .log("readiness check failed")
             call.respond(
                 HttpStatusCode.ServiceUnavailable,
-                HealthResponse("unavailable", "user-api", mapOf("database" to "unavailable")),
+                HealthResponse("unavailable", SERVICE, mapOf("database" to "unavailable")),
             )
         }
     }

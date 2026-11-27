@@ -35,6 +35,8 @@ const (
 	maxOpenRequests = 8
 	// Tokens are renewed this long before Twitch reports their expiry.
 	tokenRenewalMargin = time.Minute
+	// providerCallMessage is the log message of every IGDB call.
+	providerCallMessage = "provider call"
 )
 
 var (
@@ -269,11 +271,11 @@ func (c *Client) post(ctx context.Context, endpoint, query string) ([]byte, erro
 		"attempts", call.attempts, "status", call.status, "durationMs", time.Since(started).Milliseconds()}
 	switch {
 	case err == nil:
-		logger.InfoContext(ctx, "provider call", append(attrs, "outcome", "ok")...)
+		logger.InfoContext(ctx, providerCallMessage, append(attrs, "outcome", "ok")...)
 	case ctx.Err() != nil:
-		logger.InfoContext(ctx, "provider call", append(attrs, "outcome", "cancelled")...)
+		logger.InfoContext(ctx, providerCallMessage, append(attrs, "outcome", "cancelled")...)
 	default:
-		logger.WarnContext(ctx, "provider call", append(attrs, "outcome", callOutcome(err), "error", err.Error())...)
+		logger.WarnContext(ctx, providerCallMessage, append(attrs, "outcome", callOutcome(err), "error", err.Error())...)
 	}
 	return body, err
 }

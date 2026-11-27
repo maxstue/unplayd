@@ -18,6 +18,9 @@ type Catalog interface {
 	Batch(ctx context.Context, ids []string) (catalog.Batch, error)
 }
 
+// serviceName identifies this service in health responses.
+const serviceName = "catalog-api"
+
 // readinessTimeout bounds the database check of the readiness probe.
 const readinessTimeout = time.Second
 
@@ -36,7 +39,7 @@ func NewHandler(serviceToken string, games Catalog, ready Readiness, logger *slo
 	api := api{games: games, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "catalog-api"})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": serviceName})
 	})
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
@@ -44,11 +47,11 @@ func NewHandler(serviceToken string, games Catalog, ready Readiness, logger *slo
 		if err := ready(ctx); err != nil {
 			logger.WarnContext(r.Context(), "readiness check failed", "check", "database")
 			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-				"status": "unavailable", "service": "catalog-api", "checks": map[string]string{"database": "unavailable"}})
+				"status": "unavailable", "service": serviceName, "checks": map[string]string{"database": "unavailable"}})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status": "ok", "service": "catalog-api", "checks": map[string]string{"database": "ok"}})
+			"status": "ok", "service": serviceName, "checks": map[string]string{"database": "ok"}})
 	})
 	mux.HandleFunc("GET /games", api.search)
 	mux.HandleFunc("GET /games/suggestions", api.suggestions)

@@ -67,6 +67,8 @@ fun interface CatalogClient {
     ): CatalogGame
 }
 
+private fun unavailable() = LibraryProblem(503, "Catalog unavailable")
+
 class HttpCatalogClient(
     private val config: CatalogConfig,
 ) : CatalogClient {
@@ -128,11 +130,11 @@ class HttpCatalogClient(
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                throw LibraryProblem(503, "Catalog unavailable")
+                throw unavailable()
             }
         onStatus(response.statusCode())
         if (response.statusCode() == 404) throw LibraryProblem(400, "Unknown or inactive game")
-        if (response.statusCode() != 200) throw LibraryProblem(503, "Catalog unavailable")
+        if (response.statusCode() != 200) throw unavailable()
         val game =
             try {
                 json.decodeFromString<CatalogDetail>(response.body()).game.also {
@@ -140,7 +142,7 @@ class HttpCatalogClient(
                     it.platforms.forEach { platform -> UUID.fromString(platform.id) }
                 }
             } catch (_: Exception) {
-                throw LibraryProblem(503, "Catalog unavailable")
+                throw unavailable()
             }
         if (!game.isActive) throw LibraryProblem(400, "Unknown or inactive game")
         return game

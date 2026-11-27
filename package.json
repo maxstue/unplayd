@@ -35,8 +35,8 @@
     "dev:web": "vp run @unplayd/web#dev",
     "preview:web": "vp run @unplayd/web#preview",
     "check:repo": "vp run format:repo:check",
-    "format:repo": "vp fmt package.json pnpm-workspace.yaml .infisical.yaml README.md renovate.json contracts infra .github redocly.yaml compose.yaml apps/user-api/package.json apps/catalog-api/package.json",
-    "format:repo:check": "vp fmt --check package.json pnpm-workspace.yaml .infisical.yaml README.md renovate.json contracts infra .github redocly.yaml compose.yaml apps/user-api/package.json apps/catalog-api/package.json",
+    "format:repo": "vp fmt package.json pnpm-workspace.yaml .infisical.yaml README.md renovate.json contracts infra .railway .github redocly.yaml compose.yaml apps/user-api/package.json apps/catalog-api/package.json",
+    "format:repo:check": "vp fmt --check package.json pnpm-workspace.yaml .infisical.yaml README.md renovate.json contracts infra .railway .github redocly.yaml compose.yaml apps/user-api/package.json apps/catalog-api/package.json",
     "lint:web": "vp run @unplayd/web#lint",
     "format:web": "vp run @unplayd/web#format",
     "db:down": "infisical run --env=dev --path=/User_API --path=/Catalog_API --path=/External_Services/Postgres -- docker compose down",
@@ -45,6 +45,7 @@
   },
   "devDependencies": {
     "openapi-typescript": "7.13.0",
+    "railway": "3.17.0",
     "vite-plus": "catalog:"
   },
   "engines": {

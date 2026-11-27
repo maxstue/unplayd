@@ -1,7 +1,7 @@
 FROM eclipse-temurin:25.0.5.1_2-jdk AS build
 WORKDIR /app
 COPY . .
-RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon installDist
+RUN ./gradlew --no-daemon installDist
 
 FROM eclipse-temurin:25.0.5.1_2-jre
 WORKDIR /app
